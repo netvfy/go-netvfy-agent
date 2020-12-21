@@ -22,13 +22,15 @@ func main() {
 	}
 
 	// TODO(sneha): Assign IP address to interface
+	// Parametrize and make os.exec calls to this
 	// For now - doing this manually->
-	//        1. sudo ifconfig utun2 10.1.0.10 10.1.0.20 up
-	//        2. ping 10.1.0.20
-	// Can actually see packets being read.
-	// However this is only a point-to-point tun interface.
-	// Can we assign a specific unicast address, mask, and a gateway to a tun address?
-	// Need to make a syscall like this ->
+	//        1. sudo ifconfig utun9 10.100.0.3 10.100.0.1 netmask 255.255.0.0
+	//	     Explanation: src is IP and dst is the gateway, this is a /16 subnet
+	//        2. sudo route add -net 10.100.0.0/16 10.100.0.1
+	//	     Explanation: route add subnet to gateway
+	//        3. ping 10.100.0.42
+	// Despite the requirement of point-to-point, adding the above src, dst, and route
+	// let's us still see the traffic
 	// https://github.com/netvfy/tapcfg/blob/master/src/lib/tapcfg_unix_linux.h#L76
 	for {
 		buff := make([]byte, 1500)
