@@ -73,7 +73,7 @@ func main() {
 
 	time.Sleep(2)
 
-	// TODO(sneha): create command wrapper
+	// TODO(sneha): create command wrapper struct/funcs
 	// STEP 1: Add Route
 	cmd := exec.Command("sudo", "route", "add", "-net", subnet, gateway, "-ifscope", "utun9")
 	stderr, err = cmd.StderrPipe()
