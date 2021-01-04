@@ -21,53 +21,60 @@ type IPConfig struct {
 	Subnet  string
 }
 
-// configureInterface execs two commands
-func configureInterface(osName, iface string, ipConfig *IPConfig) error {
-	// TODO(sneha): consider how to do this for other operating systems
-	// var routeCmd *exec.Cmd
-	// var ipCmd *exec.Cmd
-	// switch osName {
-	// default:
-	// }
-
-	// STEP 2: Configure tun interface address
-	cmd2 := exec.Command("sudo", "ifconfig", "utun9", ipConfig.Addr, ipConfig.Addr, "netmask", ipConfig.Netmask)
-	stderr, err := cmd2.StderrPipe()
-
-	log.Printf("Running ifconfig command and waiting for it to finish...")
-	err = cmd2.Start()
+// generic wrapper to run command
+func runCmd(name string, cmd *exec.Cmd) error {
+	log.Printf("Configuring error pipe for: %v\n", name)
+	stderr, err := cmd.StderrPipe()
 	if err != nil {
-		log.Fatalf("Command failed to start with error: %v", err)
+		return fmt.Errorf("%v unable to configure error pipe: %v", name, err)
 	}
 
+	log.Printf("starting command: %v\n", name)
+	err = cmd.Start()
+	if err != nil {
+		return fmt.Errorf("%v command failed to start with error: %v", name, err)
+	}
 	slurp, _ := ioutil.ReadAll(stderr)
 	fmt.Printf("%s\n", slurp)
 
-	if err := cmd2.Wait(); err != nil {
-		log.Fatal(err)
+	if err := cmd.Wait(); err != nil {
+		return fmt.Errorf("%v command failed to complete with error: %v", name, err)
 	}
-	log.Println("Command ifconfig successfully run...")
+
+	log.Printf("command finished successfully: %v\n", name)
+	return nil
+}
+
+// configureInterface execs two commands
+func configureInterface(osName, iface string, ipConfig *IPConfig) error {
+	// TODO(sneha): consider how to do this for other operating systems
+	var routeCmd *exec.Cmd
+	var ipCmd *exec.Cmd
+	switch osName {
+	case "darwin":
+		routeCmd = exec.Command("sudo", "ifconfig", "utun9", ipConfig.Addr, ipConfig.Addr, "netmask", ipConfig.Netmask)
+		ipCmd = exec.Command("sudo", "route", "add", "-net", ipConfig.Subnet, ipConfig.Addr, "-ifscope", iface)
+	default:
+		return fmt.Errorf("the agent cannot run on this machine")
+	}
+
+	// Set interface address
+	fmt.Printf("Configuring interface address for: %v\n", iface)
+	err := runCmd("set address", routeCmd)
+	if err != nil {
+		log.Printf("failed to set address: %v\n", err)
+		return fmt.Errorf("unable to set address")
+	}
 
 	time.Sleep(2)
 
-	// TODO(sneha): create command wrapper struct/funcs
-	// STEP 1: Add Route
-	cmd := exec.Command("sudo", "route", "add", "-net", ipConfig.Subnet, ipConfig.Addr, "-ifscope", iface)
-	stderr, err = cmd.StderrPipe()
-
-	log.Printf("Running add route command and waiting for it to finish...")
-	err = cmd.Start()
+	// Add route for vpn subnet
+	fmt.Println("Configuring routes")
+	err = runCmd("add routes", ipCmd)
 	if err != nil {
-		log.Fatalf("Command failed to start with error: %v", err)
+		log.Printf("failed to add route: %v\n", err)
+		return fmt.Errorf("unable to add route")
 	}
-
-	slurp, _ = ioutil.ReadAll(stderr)
-	fmt.Printf("%s\n", slurp)
-
-	if err := cmd.Wait(); err != nil {
-		log.Fatal(err)
-	}
-	log.Println("Command add route successfully run...")
 
 	return nil
 }
@@ -166,13 +173,13 @@ func main() {
 
 	for {
 		log.Println("starting the tun/tap listener...")
-		log.Printf("Note traffic must be sourced from IP of iface like so: ping -S %v %v", addr, exampleDst)
+		log.Printf("Note traffic must be sourced from IP of iface like so: ping -S %v %v\n", addr, exampleDst)
 		buff := make([]byte, 1500)
 		// read from the connection
 		n, err := ifce.Read(buff)
 		// TODO(sneha): switch statement to account for different errors
 		if err != nil {
-			log.Println("tun/tap listened stopped ")
+			log.Println("tun/tap listened stopped")
 			log.Fatal(err)
 		}
 
