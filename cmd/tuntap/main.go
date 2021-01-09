@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"net"
 	"os/exec"
 	"runtime"
 	"strconv"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	water "github.com/netvfy/tuntap"
+	ipv4 "golang.org/x/net/ipv4"
 )
 
 // IPConfig contains routing and interface configuration information
@@ -199,7 +201,8 @@ func main() {
 			_, err := ifce.Read(buff)
 			fmt.Println("incoming read...")
 			if err != nil {
-				log.Fatal(err)
+				log.Printf("unable to read from iface: %v", err)
+				continue
 			}
 			egressBuffer <- buff
 		}
@@ -224,7 +227,25 @@ func main() {
 		fmt.Println("reading from switch...")
 		for {
 			fmt.Println("incoming from tcpconn...")
-			ingressBuffer <- []byte{}
+			hdr := ipv4.Header{
+				Version:  ipv4.Version,
+				Len:      ipv4.HeaderLen + 4,
+				TOS:      1,
+				TotalLen: 0xbef3,
+				ID:       0xcafe,
+				Flags:    ipv4.DontFragment,
+				FragOff:  1500,
+				TTL:      255,
+				Protocol: 1,
+				Checksum: 0xdead,
+				Src:      net.ParseIP("198.18.0.5"), Dst: net.ParseIP("198.18.0.1"),
+			}
+			buff, err := hdr.Marshal()
+			if err != nil {
+				fmt.Printf("unable to parse header: %v\n", err)
+				continue
+			}
+			ingressBuffer <- buff
 			time.Sleep(2 * time.Second)
 		}
 	}()
