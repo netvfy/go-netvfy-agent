@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	water "github.com/netvfy/tuntap"
@@ -126,6 +127,13 @@ func validateInterface(osName, iface string) bool {
 	return true
 }
 
+// TODO(sneha): is this necessary or is the interface type threadsafe?
+type safeIface struct {
+	// TODO(sneha): thoughts on struct embedding here
+	sync.Mutex
+	*water.Interface
+}
+
 var interfaceFlag string
 
 func main() {
@@ -153,6 +161,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	safeIface := safeIface{sync.Mutex{}, ifce}
 
 	// Add address to interface and routes
 	subnet := "198.18.0.0/16"
@@ -171,19 +180,58 @@ func main() {
 		log.Fatalf("unable to configure agent: %v", err)
 	}
 
+	readBuffLength := 100
+	writeBuffLen := 100
+	readChan := make(chan []byte, readBuffLength)
+	writeChan := make(chan []byte, writeBuffLen)
+
+	log.Println("starting the tun/tap listener...")
+	log.Printf("Note traffic must be sourced from IP of iface like so: ping -S %v %v\n", addr, exampleDst)
+
+	// goroutine 1 - read from tap interface
+	go func() {
+		fmt.Println("reading from tap...")
+		for {
+			fmt.Println("attempting read...")
+			buff := make([]byte, 1500)
+			safeIface.Lock()
+			_, err := safeIface.Read(buff)
+			if err != nil {
+				log.Fatal(err)
+			}
+			safeIface.Unlock()
+			readChan <- buff
+		}
+	}()
+
+	go func() {
+		fmt.Println("reading from switch...")
+		// TODO(sneha): reading from tcp connection
+		// For now this is a simple sleep plus default send for testing
+		for {
+			fmt.Println("attempting write...")
+			writeChan <- []byte{}
+			time.Sleep(5 * time.Second)
+		}
+	}()
+
 	for {
-		log.Println("starting the tun/tap listener...")
-		log.Printf("Note traffic must be sourced from IP of iface like so: ping -S %v %v\n", addr, exampleDst)
-		buff := make([]byte, 1500)
-		// read from the connection
-		n, err := ifce.Read(buff)
-		// TODO(sneha): switch statement to account for different errors
-		if err != nil {
-			log.Println("tun/tap listened stopped")
-			log.Fatal(err)
+		select {
+		// TODO(add case to handle context cancellations, keyboard interrupts, SIGTERM)
+		case writemsg := <-writeChan:
+			fmt.Println("we've received from writeChan...")
+			safeIface.Lock()
+			_, err := safeIface.Write(writemsg)
+			if err != nil {
+				log.Printf("error writing to tap interface: %v", err)
+			}
+			safeIface.Unlock()
+		case readmsg := <-readChan:
+			fmt.Println("we've received from readChan...")
+			// read from the connection
+			// TODO: writes to tcp socket conn
+			fmt.Println(readmsg)
 		}
 
-		fmt.Println(n)
-		fmt.Printf("%v", buff)
 	}
 }
