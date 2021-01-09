@@ -9,7 +9,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	water "github.com/netvfy/tuntap"
@@ -128,11 +127,13 @@ func validateInterface(osName, iface string) bool {
 }
 
 // TODO(sneha): is this necessary or is the interface type threadsafe?
-type safeIface struct {
-	// TODO(sneha): thoughts on struct embedding here
-	sync.Mutex
-	*water.Interface
-}
+// Probably not - device driver has separate read/write queues. so this shouldn't be a problem
+// (can also do read/write syscall at the same time)
+// type safeIface struct {
+// 	// TODO(sneha): thoughts on struct embedding here
+// 	sync.Mutex
+// 	*water.Interface
+// }
 
 var interfaceFlag string
 
@@ -161,7 +162,6 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	safeIface := safeIface{sync.Mutex{}, ifce}
 
 	// Add address to interface and routes
 	subnet := "198.18.0.0/16"
@@ -180,58 +180,74 @@ func main() {
 		log.Fatalf("unable to configure agent: %v", err)
 	}
 
-	readBuffLength := 100
-	writeBuffLen := 100
-	readChan := make(chan []byte, readBuffLength)
-	writeChan := make(chan []byte, writeBuffLen)
-
 	log.Println("starting the tun/tap listener...")
 	log.Printf("Note traffic must be sourced from IP of iface like so: ping -S %v %v\n", addr, exampleDst)
 
-	// goroutine 1 - read from tap interface
+	buffLen := 100
+	ingressBuffer := make(chan []byte, buffLen)
+	egressBuffer := make(chan []byte, buffLen)
+	done := make(chan int, 1)
+
+	// TODO(sneha): can use waitgroup or actor model of multiple goroutines to make this far far cleaner,
+	// handle SIGTERM, cleanup, context cancellation etc.
+
+	//goroutine #1 - read from tun interface
 	go func() {
 		fmt.Println("reading from tap...")
 		for {
-			fmt.Println("attempting read...")
 			buff := make([]byte, 1500)
-			safeIface.Lock()
-			_, err := safeIface.Read(buff)
+			_, err := ifce.Read(buff)
+			fmt.Println("incoming read...")
 			if err != nil {
 				log.Fatal(err)
 			}
-			safeIface.Unlock()
-			readChan <- buff
+			egressBuffer <- buff
 		}
 	}()
 
+	// goroutine #2 - write to tun interface
+	go func() {
+		fmt.Println("writing to tap...")
+		for {
+			buff := <-ingressBuffer
+			fmt.Println("outgoing write...")
+			_, err := ifce.Write(buff)
+			if err != nil {
+				log.Printf("there is an error writing: %v", err)
+			}
+		}
+	}()
+
+	// goroutine #3 - read from conn interface
+	// TODO(sneha): need to make far cleaner but for now can test this way
 	go func() {
 		fmt.Println("reading from switch...")
-		// TODO(sneha): reading from tcp connection
-		// For now this is a simple sleep plus default send for testing
 		for {
-			fmt.Println("attempting write...")
-			writeChan <- []byte{}
-			time.Sleep(5 * time.Second)
+			fmt.Println("incoming from tcpconn...")
+			ingressBuffer <- []byte{}
+			time.Sleep(2 * time.Second)
 		}
 	}()
 
-	for {
-		select {
-		// TODO(add case to handle context cancellations, keyboard interrupts, SIGTERM)
-		case writemsg := <-writeChan:
-			fmt.Println("we've received from writeChan...")
-			safeIface.Lock()
-			_, err := safeIface.Write(writemsg)
-			if err != nil {
-				log.Printf("error writing to tap interface: %v", err)
-			}
-			safeIface.Unlock()
-		case readmsg := <-readChan:
-			fmt.Println("we've received from readChan...")
-			// read from the connection
-			// TODO: writes to tcp socket conn
-			fmt.Println(readmsg)
+	// goroutine #4 - write to conn interface
+	// TODO(sneha): need to write but for now will printout
+	go func() {
+		fmt.Println("writing to switch...")
+		for {
+			buff := <-egressBuffer
+			fmt.Println("outgoing to tcpconn...")
+			fmt.Println(buff)
 		}
+	}()
 
+	// block on main thread until something shuts down the program
+	//TODO(sneha): listen for keyboard interrupt or SIGTERM/SIGKILL
+	select {
+	case <-done:
+		fmt.Println("closing interface...")
+		err := ifce.Close()
+		if err != nil {
+			fmt.Printf("error closing interface: %v", err)
+		}
 	}
 }
