@@ -15,14 +15,18 @@ import (
 	"encoding/pem"
 	"errors"
 	"flag"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
+
+	water "github.com/netvfy/tuntap"
 )
 
 type networkCredentials struct {
@@ -110,8 +114,10 @@ var ilog *log.Logger
 var elog *log.Logger
 
 var gSwitch switchInstance
-
 var gNetConfPath string
+var utun *water.Interface
+
+const utunName = "utun7"
 
 func provisioning(provLink string, netLabel string) {
 
@@ -386,6 +392,30 @@ func connController(ctx context.Context, cancel context.CancelFunc, ctrlInfo *co
 			gSwitch.info.Port = switchInfo.Port
 			gSwitch.info.IPaddr = switchInfo.IPaddr
 
+			cmd := exec.Command("ifconfig", utunName, gSwitch.info.IPaddr, gSwitch.info.IPaddr, "netmask", "255.254.0.0")
+			stderr, err := cmd.StderrPipe()
+			err = cmd.Start()
+			if err != nil {
+				elog.Fatalf("failed to ifconfig on %v: %v\n", utunName, err)
+			}
+			slurp, _ := ioutil.ReadAll(stderr)
+			if err := cmd.Wait(); err != nil {
+				dlog.Printf("stderr: %v\n", slurp)
+				dlog.Fatalf("failed to ifconfig on %v: %v\n", utunName, err)
+			}
+
+			cmd = exec.Command("route", "add", "-net", "198.18.0.0", gSwitch.info.IPaddr, "255.254.0.0")
+			stderr, err = cmd.StderrPipe()
+			err = cmd.Start()
+			if err != nil {
+				elog.Fatalf("failed to route on %v: %v", utunName, err)
+			}
+			slurp, _ = ioutil.ReadAll(stderr)
+			if err := cmd.Wait(); err != nil {
+				dlog.Printf("stderr: %v\n", slurp)
+				dlog.Fatalf("failed to route on %v: %v\n", utunName, err)
+			}
+
 			// If switch is potentially running let's cancel it
 			if gSwitch.cancel != nil {
 				dlog.Printf("close the connection to the vswitch\n")
@@ -417,15 +447,18 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 
 	var done chan bool
 	var ticker *time.Ticker
-	var binBuf bytes.Buffer
+	var keepaliveBuf bytes.Buffer
 	var nvhdr *nvHdr
 	var state tls.ConnectionState
+	var offset int = 0
+
+	frameBuf := make([]byte, 2000)
 
 	// Establish the TLS connection to the vswitch
 	conn, err := tls.Dial("tcp", gSwitch.info.Addr+":"+gSwitch.info.Port, config)
 	if err != nil {
 		elog.Printf("failed to dial the vswitch: %v", err)
-		goto out
+		goto error
 	}
 	defer conn.Close()
 
@@ -447,23 +480,28 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 		Length: 4,
 		Type:   0,
 	}
-	binary.Write(&binBuf, binary.BigEndian, nvhdr)
+	binary.Write(&keepaliveBuf, binary.BigEndian, nvhdr)
+	conn.Write(keepaliveBuf.Bytes())
 
 	// Every second we send a keep alive to the vswitch
 	ticker = time.NewTicker(1 * time.Second)
 	done = make(chan bool)
-	func() {
+	go func() {
 		for {
 			select {
 			case <-ctx.Done():
 				// the vswitch is done
+				dlog.Printf("vswitch connection closing, context is done\n")
 				return
 				// the ticker is done
 			case <-done:
+				dlog.Printf("vswitch connection closing, ticker is done\n")
 				return
 			case <-ticker.C:
-				_, err := conn.Write(binBuf.Bytes())
+				n, err := conn.Write(keepaliveBuf.Bytes())
+				fmt.Printf("wrote n bytes: %v\n", n)
 				if err != nil {
+					dlog.Printf("got disconnected from the switch: %v\n", err)
 					// the agent got disconnected from the vswitch
 					ticker.Stop()
 					done <- true
@@ -473,7 +511,72 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 		}
 	}()
 
-out:
+	for {
+		select {
+		case <-done:
+			// ticker detected a disconnect form the controller
+			goto error
+		default:
+			break
+		}
+
+		n, err := conn.Read(frameBuf[offset:])
+		if err != nil {
+			dlog.Printf("failed to read from vswitch: %v\n", err)
+			goto error
+		}
+
+		// Move the offset after we've read more bytes into the buffer
+		offset += n
+		// Verify we've read enough bytes to make sense of our custom header
+		if offset < 4 {
+			continue
+		}
+
+		// Extract the length
+		length := binary.BigEndian.Uint16(frameBuf[0:])
+		// Check if the length is valid
+		if length < 2 {
+			goto error
+		}
+
+		// Check if we have the complete payload
+		if uint32(offset) < uint32(2+length) {
+			continue
+		}
+
+		// Extract the type
+		nvType := binary.BigEndian.Uint16(frameBuf[2:])
+
+		switch nvType {
+		case 0:
+			// We just received a keep alive from the server
+			break
+		case 1:
+
+			dlog.Printf("length: %d -- type: %d\n", length, nvType)
+
+			dlog.Printf("%02x:%02x:%02x:%02x:%02x:%02x\n",
+				frameBuf[4:5],
+				frameBuf[5:6],
+				frameBuf[6:7],
+				frameBuf[7:8],
+				frameBuf[8:9],
+				frameBuf[9:10])
+
+			dlog.Printf("%02x:%02x:%02x:%02x:%02x:%02x\n",
+				frameBuf[10:11],
+				frameBuf[11:12],
+				frameBuf[12:13],
+				frameBuf[13:14],
+				frameBuf[14:15],
+				frameBuf[15:16])
+		}
+
+		offset = 0
+	}
+
+error:
 	time.Sleep(3 * time.Second)
 	cancel()
 	gSwitch.cancel = nil
@@ -726,6 +829,17 @@ func main() {
 	} else if *list == true {
 		listNetworks()
 	} else if *connect != "" {
+
+		config := water.Config{
+			DeviceType: water.TUN,
+		}
+		var err error
+		config.Name = utunName
+		utun, err = water.New(config)
+		if err != nil {
+			elog.Fatalf("failed to initialize the %v interface: %s\n", utunName, err)
+		}
+
 		for {
 			connectNetwork(*connect)
 			time.Sleep(3 * time.Second)
