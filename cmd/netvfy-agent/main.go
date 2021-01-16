@@ -15,7 +15,6 @@ import (
 	"encoding/pem"
 	"errors"
 	"flag"
-	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
@@ -480,8 +479,8 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 		Length: 4,
 		Type:   0,
 	}
+
 	binary.Write(&keepaliveBuf, binary.BigEndian, nvhdr)
-	conn.Write(keepaliveBuf.Bytes())
 
 	// Every second we send a keep alive to the vswitch
 	ticker = time.NewTicker(1 * time.Second)
@@ -498,8 +497,7 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 				dlog.Printf("vswitch connection closing, ticker is done\n")
 				return
 			case <-ticker.C:
-				n, err := conn.Write(keepaliveBuf.Bytes())
-				fmt.Printf("wrote n bytes: %v\n", n)
+				_, err := conn.Write(keepaliveBuf.Bytes())
 				if err != nil {
 					dlog.Printf("got disconnected from the switch: %v\n", err)
 					// the agent got disconnected from the vswitch
@@ -539,8 +537,12 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 		if length < 2 {
 			goto error
 		}
+		// Check if the length is not bigger than our buffer
+		if length > uint16(cap(frameBuf)) {
+			goto error
+		}
 
-		// Check if we have the complete payload
+		// If we don't have the complete payload yet, we skip the next part
 		if uint32(offset) < uint32(2+length) {
 			continue
 		}
@@ -553,7 +555,7 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 			// We just received a keep alive from the server
 			break
 		case 1:
-
+			// We just received an ethernet frame from the server
 			dlog.Printf("length: %d -- type: %d\n", length, nvType)
 
 			dlog.Printf("%02x:%02x:%02x:%02x:%02x:%02x\n",
@@ -571,6 +573,21 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 				frameBuf[13:14],
 				frameBuf[14:15],
 				frameBuf[15:16])
+
+			etherType := binary.BigEndian.Uint16(frameBuf[16:18])
+			dlog.Printf("Ethertype %04x\n", etherType)
+
+			// ARP -> 0x0806
+			// IP  -> 0x0800
+
+			b, err := utun.Write(frameBuf[4+14 : offset])
+			if err != nil {
+				elog.Printf("failed to write to the utun device: %v\n", err)
+			}
+			dlog.Printf("wrote %d bytes to the utun device\n", b)
+
+		default:
+			goto error
 		}
 
 		offset = 0
