@@ -560,7 +560,7 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 			// We just received an ethernet frame from the server
 			dlog.Printf("length: %d -- type: %d\n", length, nvType)
 
-			dlog.Printf("%02x:%02x:%02x:%02x:%02x:%02x\n",
+			dlog.Printf("DST MAC: %02x:%02x:%02x:%02x:%02x:%02x\n",
 				frameBuf[4:5],
 				frameBuf[5:6],
 				frameBuf[6:7],
@@ -568,7 +568,7 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 				frameBuf[8:9],
 				frameBuf[9:10])
 
-			dlog.Printf("%02x:%02x:%02x:%02x:%02x:%02x\n",
+			dlog.Printf("SRC MAC: %02x:%02x:%02x:%02x:%02x:%02x\n",
 				frameBuf[10:11],
 				frameBuf[11:12],
 				frameBuf[12:13],
