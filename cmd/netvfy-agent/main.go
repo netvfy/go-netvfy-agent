@@ -115,6 +115,7 @@ var elog *log.Logger
 var gSwitch switchInstance
 var gNetConfPath string
 var utun *water.Interface
+var vswitchConn *tls.Conn
 
 const utunName = "utun7"
 
@@ -454,17 +455,18 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 	frameBuf := make([]byte, 2000)
 
 	// Establish the TLS connection to the vswitch
-	conn, err := tls.Dial("tcp", gSwitch.info.Addr+":"+gSwitch.info.Port, config)
+	var err error
+	vswitchConn, err = tls.Dial("tcp", gSwitch.info.Addr+":"+gSwitch.info.Port, config)
 	if err != nil {
 		elog.Printf("failed to dial the vswitch: %v", err)
 		goto error
 	}
-	defer conn.Close()
+	defer vswitchConn.Close()
 
-	dlog.Printf("connected to the vswitch: %v", conn.RemoteAddr())
+	dlog.Printf("connected to the vswitch: %v", vswitchConn.RemoteAddr())
 
 	// Print the certificate information of the vswitch
-	state = conn.ConnectionState()
+	state = vswitchConn.ConnectionState()
 	for _, cert := range state.PeerCertificates {
 		dlog.Printf("vswitch: issuer Name: %s\n", cert.Issuer)
 		dlog.Printf("vswitch: expiry: %s \n", cert.NotAfter.Format("2006-January-02"))
@@ -497,7 +499,7 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 				dlog.Printf("vswitch connection closing, ticker is done\n")
 				return
 			case <-ticker.C:
-				_, err := conn.Write(keepaliveBuf.Bytes())
+				_, err := vswitchConn.Write(keepaliveBuf.Bytes())
 				if err != nil {
 					dlog.Printf("got disconnected from the switch: %v\n", err)
 					// the agent got disconnected from the vswitch
@@ -518,7 +520,7 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 			break
 		}
 
-		n, err := conn.Read(frameBuf[offset:])
+		n, err := vswitchConn.Read(frameBuf[offset:])
 		if err != nil {
 			dlog.Printf("failed to read from vswitch: %v\n", err)
 			goto error
@@ -854,8 +856,43 @@ func main() {
 		config.Name = utunName
 		utun, err = water.New(config)
 		if err != nil {
-			elog.Fatalf("failed to initialize the %v interface: %s\n", utunName, err)
+			elog.Fatalf("failed to initialize the %s interface: %v\n", utunName, err)
 		}
+
+		go func() {
+			frameBuf := make([]byte, 2000)
+			for {
+				n, err := utun.Read(frameBuf[18:])
+				if err != nil {
+					elog.Printf("failed to read from %s: %v\n", utunName, err)
+				}
+				dlog.Printf("read %d bytes from %s\n", n, utunName)
+
+				// nvHeader lenght value
+				binary.BigEndian.PutUint16(frameBuf[0:2], uint16(n+14+2))
+				// nvHeader type frame
+				binary.BigEndian.PutUint16(frameBuf[2:4], 1)
+
+				// DST MAC address
+				binary.BigEndian.PutUint16(frameBuf[4:6], 0x9a36)
+				binary.BigEndian.PutUint16(frameBuf[6:8], 0x31ee)
+				binary.BigEndian.PutUint16(frameBuf[8:10], 0xe9d4)
+
+				// SRC MAC address
+				binary.BigEndian.PutUint16(frameBuf[10:12], 0x9a36)
+				binary.BigEndian.PutUint16(frameBuf[12:14], 0x31ee)
+				binary.BigEndian.PutUint16(frameBuf[14:16], 0xe9d3)
+
+				// EtherType IP
+				binary.BigEndian.PutUint16(frameBuf[16:18], 0x0800)
+
+				b, err := vswitchConn.Write(frameBuf[0 : n+14+4])
+				if err != nil {
+					elog.Printf("failed to write frame to %s\n", utunName)
+				}
+				dlog.Printf("wrote %d bytes to %s\n", b, utunName)
+			}
+		}()
 
 		for {
 			connectNetwork(*connect)
