@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/binary"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -197,8 +198,8 @@ func main() {
 	go func() {
 		fmt.Println("reading from tap...")
 		for {
-			buff := make([]byte, 1500)
-			_, err := ifce.Read(buff)
+			buff := make([]byte, 1518)
+			_, err := ifce.Read(buff[14:])
 			fmt.Println("incoming read...")
 			if err != nil {
 				log.Printf("unable to read from iface: %v", err)
@@ -250,14 +251,34 @@ func main() {
 		}
 	}()
 
+	//TODO: do we specify our switch only works for IPv4?
+
 	// goroutine #4 - write to conn interface
 	// TODO(sneha): need to write but for now will printout
 	go func() {
 		fmt.Println("writing to switch...")
 		for {
 			buff := <-egressBuffer
+			// TODO(sneha): check ARP cache
+			// If no ARP cache, send out ARP broadcast and wait for reply
+
+			// Add ethernet header
+			etherType := []byte("\x800")
+			// TODO: will use hardcoded values here shortly
+			srcMAC := make([]byte, 6)
+			dstMAC := make([]byte, 6)
+
+			// add ethernet header
+			copy(buff[0:6], dstMAC)
+			copy(buff[6:12], srcMAC)
+			copy(buff[12:14], etherType)
+
+			// determine IP packet Len
+			// TODO(sneha): this is panic-ing
+			len := binary.BigEndian.Uint16(buff[18:19])
+
 			fmt.Println("outgoing to tcpconn...")
-			fmt.Println(buff)
+			fmt.Println(buff[0 : 14+len])
 		}
 	}()
 
