@@ -119,7 +119,26 @@ var gNetConfPath string
 var utun *water.Interface
 var vswitchConn *tls.Conn
 
+var gMAC []byte
+
 const utunName = "utun7"
+
+func genMAC() []byte {
+
+	mac := make([]byte, 6)
+	rand.Read(mac)
+
+	// set the local bit
+	// https://en.wikipedia.org/wiki/MAC_address#Universal_vs._local_(U/L_bit)
+	mac[0] |= 0b00000010
+
+	// make sure the last bit is not set
+	// when the last bit is 0, it means the MAC is unicast
+	// https://en.wikipedia.org/wiki/MAC_address#Unicast_vs._multicast_(I/G_bit)
+	mac[0] &= 0b11111110
+
+	return mac
+}
 
 func provisioning(provLink string, netLabel string) {
 
@@ -861,6 +880,8 @@ func main() {
 		listNetworks()
 	} else if *connect != "" {
 
+		gMAC = genMAC()
+
 		config := water.Config{
 			DeviceType: water.TUN,
 		}
@@ -891,9 +912,7 @@ func main() {
 				binary.BigEndian.PutUint16(frameBuf[8:10], 0xe9d4)
 
 				// SRC MAC address
-				binary.BigEndian.PutUint16(frameBuf[10:12], 0x9a36)
-				binary.BigEndian.PutUint16(frameBuf[12:14], 0x31ee)
-				binary.BigEndian.PutUint16(frameBuf[14:16], 0xe9d3)
+				copy(frameBuf[10:16], gMAC[0:6])
 
 				// EtherType IP
 				binary.BigEndian.PutUint16(frameBuf[16:18], 0x0800)
