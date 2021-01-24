@@ -18,6 +18,7 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -86,10 +87,11 @@ type nodeInformation struct {
 }
 
 type switchInformation struct {
-	Action string `json:"action"`
-	Addr   string `json:"addr"`
-	Port   string `json:"port"`
-	IPaddr string `json:"ipaddr"`
+	Action  string `json:"action"`
+	Addr    string `json:"addr"`
+	Port    string `json:"port"`
+	IPaddr  string `json:"ipaddr"`
+	Netmask string `json:"netmask"`
 }
 
 type keepAlive struct {
@@ -232,19 +234,19 @@ func provisioning(provLink string, netLabel string) {
 
 	resp, err := client.Do(request)
 	if err != nil {
-		dlog.Fatalf("failed to perform the http request: %v\n", err)
+		elog.Fatalf("failed to perform the http request: %v\n", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		dlog.Fatalf("failed to read the query response: %v\n", err)
+		elog.Fatalf("failed to read the query response: %v\n", err)
 	}
 
 	// Unmarshal the CSR response
 	err = json.Unmarshal(body, &networkCred)
 	if err != nil {
-		dlog.Fatalf("failed to unmarshal the provisioning response: %v\n", err)
+		elog.Fatalf("failed to unmarshal the provisioning response: %v\n", err)
 	}
 
 	// If no network name was provided, ask for one
@@ -255,7 +257,7 @@ func provisioning(provLink string, netLabel string) {
 		// ReadString will block until the delimiter is entered
 		networkCred.Name, err = reader.ReadString('\n')
 		if err != nil {
-			dlog.Fatalf("failed to read the entered network name: %v\n", err)
+			elog.Fatalf("failed to read the entered network name: %v\n", err)
 		}
 		networkCred.Name = strings.TrimRight(networkCred.Name, "\r\n")
 	}
@@ -290,7 +292,7 @@ func connController(ctx context.Context, cancel context.CancelFunc, ctrlInfo *co
 	// Establish the TLS connection to the controller
 	conn, err := tls.Dial("tcp", ctrlInfo.Addr+":"+ctrlInfo.Port, config)
 	if err != nil {
-		elog.Printf("failed to dial the controller: %v", err)
+		elog.Printf("failed to dial the controller %s:%s: %v", ctrlInfo.Addr, ctrlInfo.Port, err)
 		return
 	}
 	defer conn.Close()
@@ -377,43 +379,53 @@ func connController(ctx context.Context, cancel context.CancelFunc, ctrlInfo *co
 			return
 		}
 
-		dlog.Printf("vswitch info: %s\n", switchInfo)
-
 		if switchInfo.Action == "netinfos" &&
 			(gSwitch.info.Addr != switchInfo.Addr ||
 				gSwitch.info.Port != switchInfo.Port ||
-				gSwitch.info.IPaddr != switchInfo.IPaddr) {
+				gSwitch.info.IPaddr != switchInfo.IPaddr ||
+				gSwitch.info.Netmask != switchInfo.Netmask) {
 
-			dlog.Printf("%s -- %s\n", gSwitch.info.Addr, switchInfo.Addr)
-			dlog.Printf("%s -- %s\n", gSwitch.info.Port, switchInfo.Port)
-			dlog.Printf("%s -- %s\n", gSwitch.info.IPaddr, switchInfo.IPaddr)
+			dlog.Printf("Addr: %s -- %s\n", gSwitch.info.Addr, switchInfo.Addr)
+			dlog.Printf("Port: %s -- %s\n", gSwitch.info.Port, switchInfo.Port)
+			dlog.Printf("IPaddr: %s -- %s\n", gSwitch.info.IPaddr, switchInfo.IPaddr)
+			dlog.Printf("Netmask: %s -- %s\n", gSwitch.info.Netmask, switchInfo.Netmask)
 
 			gSwitch.info.Addr = switchInfo.Addr
 			gSwitch.info.Port = switchInfo.Port
 			gSwitch.info.IPaddr = switchInfo.IPaddr
+			gSwitch.info.Netmask = switchInfo.Netmask
 
-			cmd := exec.Command("ifconfig", utunName, gSwitch.info.IPaddr, gSwitch.info.IPaddr, "netmask", "255.254.0.0")
+			cmd := exec.Command("ifconfig", utunName, gSwitch.info.IPaddr, gSwitch.info.IPaddr, "netmask", gSwitch.info.Netmask)
+			dlog.Printf("%s\n", cmd.String())
 			stderr, err := cmd.StderrPipe()
 			err = cmd.Start()
 			if err != nil {
-				elog.Fatalf("failed to ifconfig on %v: %v\n", utunName, err)
+				elog.Fatalf("failed to apply ifconfig on %v: %v\n", utunName, err)
 			}
 			slurp, _ := ioutil.ReadAll(stderr)
 			if err := cmd.Wait(); err != nil {
 				dlog.Printf("stderr: %v\n", slurp)
-				dlog.Fatalf("failed to ifconfig on %v: %v\n", utunName, err)
+				dlog.Fatalf("failed to apply ifconfig on %v: %v\n", utunName, err)
 			}
 
-			cmd = exec.Command("route", "add", "-net", "198.18.0.0", gSwitch.info.IPaddr, "255.254.0.0")
+			// We want to extract the subnet from the IP and netmask
+			// 192.168.0.1 & 255.255.0.0 --> 192.168.0.0
+			ipv4addr := net.ParseIP(gSwitch.info.IPaddr)
+			ipv4netmask := (net.ParseIP(gSwitch.info.Netmask)).To4()
+			mask := net.IPv4Mask(ipv4netmask[0], ipv4netmask[1], ipv4netmask[2], ipv4netmask[3])
+			subnet := ipv4addr.Mask(net.CIDRMask(mask.Size()))
+
+			cmd = exec.Command("route", "add", "-net", subnet.String(), gSwitch.info.IPaddr, gSwitch.info.Netmask)
+			dlog.Printf("%v\n", cmd.String())
 			stderr, err = cmd.StderrPipe()
 			err = cmd.Start()
 			if err != nil {
-				elog.Fatalf("failed to route on %v: %v", utunName, err)
+				elog.Fatalf("failed to add new route on %v: %v", utunName, err)
 			}
 			slurp, _ = ioutil.ReadAll(stderr)
 			if err := cmd.Wait(); err != nil {
 				dlog.Printf("stderr: %v\n", slurp)
-				dlog.Fatalf("failed to route on %v: %v\n", utunName, err)
+				dlog.Fatalf("failed to add new route on %v: %v\n", utunName, err)
 			}
 
 			// If switch is potentially running let's cancel it
