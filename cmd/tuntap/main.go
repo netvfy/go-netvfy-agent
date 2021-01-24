@@ -262,10 +262,20 @@ func main() {
 			// TODO(sneha): check ARP cache
 			// If no ARP cache, send out ARP broadcast and wait for reply
 
+			// Frame is of this struct
+			// Ethernet Header
+			//  destination MAC - 6 bytes
+			//  source MAC - 6 bytes
+			//  ether type - 2 bytes
+			// IP Header
+			//  version + IHL - 1 byte
+			//  DSCP + ECN - 1 byte
+			//  Total IP packet length (plus header) - 2 bytes
+			// Payload
+
 			// Add ethernet header
 			etherType := []byte("\x800")
-			// TODO: will use hardcoded values here shortly
-			srcMAC := make([]byte, 6)
+			srcMAC := make([]byte, 6) // TODO(sneha): change from hardcoded 0 values
 			dstMAC := make([]byte, 6)
 
 			// add ethernet header
@@ -273,9 +283,7 @@ func main() {
 			copy(buff[6:12], srcMAC)
 			copy(buff[12:14], etherType)
 
-			// determine IP packet Len
-			// TODO(sneha): this is panic-ing
-			len := binary.BigEndian.Uint16(buff[18:19])
+			len := binary.BigEndian.Uint16(buff[16:18])
 
 			fmt.Println("outgoing to tcpconn...")
 			fmt.Println(buff[0 : 14+len])
