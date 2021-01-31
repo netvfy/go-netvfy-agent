@@ -414,6 +414,8 @@ func connController(ctx context.Context, cancel context.CancelFunc, ctrlInfo *co
 			gSwitch.info.IPaddr = switchInfo.IPaddr
 			gSwitch.info.Netmask = switchInfo.Netmask
 
+			// FIXME
+			// replace this section once these functions are included in the tuntap library
 			cmd := exec.Command("ifconfig", utunName, gSwitch.info.IPaddr, gSwitch.info.IPaddr, "netmask", gSwitch.info.Netmask)
 			dlog.Printf("%s\n", cmd.String())
 			stderr, err := cmd.StderrPipe()
