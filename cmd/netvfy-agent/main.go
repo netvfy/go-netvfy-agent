@@ -487,12 +487,19 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 
 	frameBuf := make([]byte, 2000)
 
+	defer func() {
+		time.Sleep(3 * time.Second)
+		cancel()
+		gSwitch.cancel = nil
+		gSwitch.ctx = nil
+	}()
+
 	// Establish the TLS connection to the vswitch
 	var err error
 	vswitchConn, err = tls.Dial("tcp", gSwitch.info.Addr+":"+gSwitch.info.Port, config)
 	if err != nil {
 		elog.Printf("failed to dial the vswitch: %v", err)
-		goto error
+		return
 	}
 	defer vswitchConn.Close()
 
@@ -548,7 +555,7 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 		select {
 		case <-done:
 			// ticker detected a disconnect form the controller
-			goto error
+			return
 		default:
 			break
 		}
@@ -556,7 +563,7 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 		n, err := vswitchConn.Read(frameBuf[offset:])
 		if err != nil {
 			dlog.Printf("failed to read from vswitch: %v\n", err)
-			goto error
+			return
 		}
 
 		// Move the offset after we've read more bytes into the buffer
@@ -570,11 +577,11 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 		length := binary.BigEndian.Uint16(frameBuf[0:])
 		// Check if the length is valid
 		if length < 2 {
-			goto error
+			return
 		}
 		// Check if the length is not bigger than our buffer
 		if length > uint16(cap(frameBuf)) {
-			goto error
+			return
 		}
 
 		// If we don't have the complete payload yet, we skip the next part
@@ -622,17 +629,11 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 			dlog.Printf("wrote %d bytes to the utun device\n", b)
 
 		default:
-			goto error
+			return
 		}
 
 		offset = 0
 	}
-
-error:
-	time.Sleep(3 * time.Second)
-	cancel()
-	gSwitch.cancel = nil
-	gSwitch.ctx = nil
 }
 
 func connectNetwork(networkName string) {
