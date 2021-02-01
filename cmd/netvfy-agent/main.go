@@ -18,11 +18,15 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
+
+	water "github.com/netvfy/tuntap"
 )
 
 type networkCredentials struct {
@@ -83,10 +87,11 @@ type nodeInformation struct {
 }
 
 type switchInformation struct {
-	Action string `json:"action"`
-	Addr   string `json:"addr"`
-	Port   string `json:"port"`
-	IPaddr string `json:"ipaddr"`
+	Action  string `json:"action"`
+	Addr    string `json:"addr"`
+	Port    string `json:"port"`
+	IPaddr  string `json:"ipaddr"`
+	Netmask string `json:"netmask"`
 }
 
 type keepAlive struct {
@@ -110,8 +115,30 @@ var ilog *log.Logger
 var elog *log.Logger
 
 var gSwitch switchInstance
-
 var gNetConfPath string
+var utun *water.Interface
+var vswitchConn *tls.Conn
+
+var gMAC []byte
+
+const utunName = "utun7"
+
+func genMAC() []byte {
+
+	mac := make([]byte, 6)
+	rand.Read(mac)
+
+	// set the local bit
+	// https://en.wikipedia.org/wiki/MAC_address#Universal_vs._local_(U/L_bit)
+	mac[0] |= 0b00000010
+
+	// make sure the last bit is not set
+	// when the last bit is 0, it means the MAC is unicast
+	// https://en.wikipedia.org/wiki/MAC_address#Unicast_vs._multicast_(I/G_bit)
+	mac[0] &= 0b11111110
+
+	return mac
+}
 
 func provisioning(provLink string, netLabel string) {
 
@@ -226,19 +253,19 @@ func provisioning(provLink string, netLabel string) {
 
 	resp, err := client.Do(request)
 	if err != nil {
-		dlog.Fatalf("failed to perform the http request: %v\n", err)
+		elog.Fatalf("failed to perform the http request: %v\n", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		dlog.Fatalf("failed to read the query response: %v\n", err)
+		elog.Fatalf("failed to read the query response: %v\n", err)
 	}
 
 	// Unmarshal the CSR response
 	err = json.Unmarshal(body, &networkCred)
 	if err != nil {
-		dlog.Fatalf("failed to unmarshal the provisioning response: %v\n", err)
+		elog.Fatalf("failed to unmarshal the provisioning response: %v\n", err)
 	}
 
 	// If no network name was provided, ask for one
@@ -249,7 +276,7 @@ func provisioning(provLink string, netLabel string) {
 		// ReadString will block until the delimiter is entered
 		networkCred.Name, err = reader.ReadString('\n')
 		if err != nil {
-			dlog.Fatalf("failed to read the entered network name: %v\n", err)
+			elog.Fatalf("failed to read the entered network name: %v\n", err)
 		}
 		networkCred.Name = strings.TrimRight(networkCred.Name, "\r\n")
 	}
@@ -284,7 +311,7 @@ func connController(ctx context.Context, cancel context.CancelFunc, ctrlInfo *co
 	// Establish the TLS connection to the controller
 	conn, err := tls.Dial("tcp", ctrlInfo.Addr+":"+ctrlInfo.Port, config)
 	if err != nil {
-		elog.Printf("failed to dial the controller: %v", err)
+		elog.Printf("failed to dial the controller %s:%s: %v", ctrlInfo.Addr, ctrlInfo.Port, err)
 		return
 	}
 	defer conn.Close()
@@ -371,20 +398,56 @@ func connController(ctx context.Context, cancel context.CancelFunc, ctrlInfo *co
 			return
 		}
 
-		dlog.Printf("vswitch info: %s\n", switchInfo)
-
 		if switchInfo.Action == "netinfos" &&
 			(gSwitch.info.Addr != switchInfo.Addr ||
 				gSwitch.info.Port != switchInfo.Port ||
-				gSwitch.info.IPaddr != switchInfo.IPaddr) {
+				gSwitch.info.IPaddr != switchInfo.IPaddr ||
+				gSwitch.info.Netmask != switchInfo.Netmask) {
 
-			dlog.Printf("%s -- %s\n", gSwitch.info.Addr, switchInfo.Addr)
-			dlog.Printf("%s -- %s\n", gSwitch.info.Port, switchInfo.Port)
-			dlog.Printf("%s -- %s\n", gSwitch.info.IPaddr, switchInfo.IPaddr)
+			dlog.Printf("Addr: %s -- %s\n", gSwitch.info.Addr, switchInfo.Addr)
+			dlog.Printf("Port: %s -- %s\n", gSwitch.info.Port, switchInfo.Port)
+			dlog.Printf("IPaddr: %s -- %s\n", gSwitch.info.IPaddr, switchInfo.IPaddr)
+			dlog.Printf("Netmask: %s -- %s\n", gSwitch.info.Netmask, switchInfo.Netmask)
 
 			gSwitch.info.Addr = switchInfo.Addr
 			gSwitch.info.Port = switchInfo.Port
 			gSwitch.info.IPaddr = switchInfo.IPaddr
+			gSwitch.info.Netmask = switchInfo.Netmask
+
+			// FIXME
+			// replace this section once these functions are included in the tuntap library
+			cmd := exec.Command("ifconfig", utunName, gSwitch.info.IPaddr, gSwitch.info.IPaddr, "netmask", gSwitch.info.Netmask)
+			dlog.Printf("%s\n", cmd.String())
+			stderr, err := cmd.StderrPipe()
+			err = cmd.Start()
+			if err != nil {
+				elog.Fatalf("failed to apply ifconfig on %v: %v\n", utunName, err)
+			}
+			slurp, _ := ioutil.ReadAll(stderr)
+			if err := cmd.Wait(); err != nil {
+				dlog.Printf("stderr: %v\n", slurp)
+				dlog.Fatalf("failed to apply ifconfig on %v: %v\n", utunName, err)
+			}
+
+			// We want to extract the subnet from the IP and netmask
+			// 192.168.0.1 & 255.255.0.0 --> 192.168.0.0
+			ipv4addr := net.ParseIP(gSwitch.info.IPaddr)
+			ipv4netmask := (net.ParseIP(gSwitch.info.Netmask)).To4()
+			mask := net.IPv4Mask(ipv4netmask[0], ipv4netmask[1], ipv4netmask[2], ipv4netmask[3])
+			subnet := ipv4addr.Mask(net.CIDRMask(mask.Size()))
+
+			cmd = exec.Command("route", "add", "-net", subnet.String(), gSwitch.info.IPaddr, gSwitch.info.Netmask)
+			dlog.Printf("%v\n", cmd.String())
+			stderr, err = cmd.StderrPipe()
+			err = cmd.Start()
+			if err != nil {
+				elog.Fatalf("failed to add new route on %v: %v", utunName, err)
+			}
+			slurp, _ = ioutil.ReadAll(stderr)
+			if err := cmd.Wait(); err != nil {
+				dlog.Printf("stderr: %v\n", slurp)
+				dlog.Fatalf("failed to add new route on %v: %v\n", utunName, err)
+			}
 
 			// If switch is potentially running let's cancel it
 			if gSwitch.cancel != nil {
@@ -417,22 +480,33 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 
 	var done chan bool
 	var ticker *time.Ticker
-	var binBuf bytes.Buffer
+	var keepaliveBuf bytes.Buffer
 	var nvhdr *nvHdr
 	var state tls.ConnectionState
+	var offset int = 0
+
+	frameBuf := make([]byte, 2000)
+
+	defer func() {
+		time.Sleep(3 * time.Second)
+		cancel()
+		gSwitch.cancel = nil
+		gSwitch.ctx = nil
+	}()
 
 	// Establish the TLS connection to the vswitch
-	conn, err := tls.Dial("tcp", gSwitch.info.Addr+":"+gSwitch.info.Port, config)
+	var err error
+	vswitchConn, err = tls.Dial("tcp", gSwitch.info.Addr+":"+gSwitch.info.Port, config)
 	if err != nil {
 		elog.Printf("failed to dial the vswitch: %v", err)
-		goto out
+		return
 	}
-	defer conn.Close()
+	defer vswitchConn.Close()
 
-	dlog.Printf("connected to the vswitch: %v", conn.RemoteAddr())
+	dlog.Printf("connected to the vswitch: %v", vswitchConn.RemoteAddr())
 
 	// Print the certificate information of the vswitch
-	state = conn.ConnectionState()
+	state = vswitchConn.ConnectionState()
 	for _, cert := range state.PeerCertificates {
 		dlog.Printf("vswitch: issuer Name: %s\n", cert.Issuer)
 		dlog.Printf("vswitch: expiry: %s \n", cert.NotAfter.Format("2006-January-02"))
@@ -447,23 +521,27 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 		Length: 4,
 		Type:   0,
 	}
-	binary.Write(&binBuf, binary.BigEndian, nvhdr)
+
+	binary.Write(&keepaliveBuf, binary.BigEndian, nvhdr)
 
 	// Every second we send a keep alive to the vswitch
 	ticker = time.NewTicker(1 * time.Second)
 	done = make(chan bool)
-	func() {
+	go func() {
 		for {
 			select {
 			case <-ctx.Done():
 				// the vswitch is done
+				dlog.Printf("vswitch connection closing, context is done\n")
 				return
 				// the ticker is done
 			case <-done:
+				dlog.Printf("vswitch connection closing, ticker is done\n")
 				return
 			case <-ticker.C:
-				_, err := conn.Write(binBuf.Bytes())
+				_, err := vswitchConn.Write(keepaliveBuf.Bytes())
 				if err != nil {
+					dlog.Printf("got disconnected from the switch: %v\n", err)
 					// the agent got disconnected from the vswitch
 					ticker.Stop()
 					done <- true
@@ -473,11 +551,89 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 		}
 	}()
 
-out:
-	time.Sleep(3 * time.Second)
-	cancel()
-	gSwitch.cancel = nil
-	gSwitch.ctx = nil
+	for {
+		select {
+		case <-done:
+			// ticker detected a disconnect form the controller
+			return
+		default:
+			break
+		}
+
+		n, err := vswitchConn.Read(frameBuf[offset:])
+		if err != nil {
+			dlog.Printf("failed to read from vswitch: %v\n", err)
+			return
+		}
+
+		// Move the offset after we've read more bytes into the buffer
+		offset += n
+		// Verify we've read enough bytes to make sense of our custom header
+		if offset < 4 {
+			continue
+		}
+
+		// Extract the length
+		length := binary.BigEndian.Uint16(frameBuf[0:])
+		// Check if the length is valid
+		if length < 2 {
+			return
+		}
+		// Check if the length is not bigger than our buffer
+		if length > uint16(cap(frameBuf)) {
+			return
+		}
+
+		// If we don't have the complete payload yet, we skip the next part
+		if uint32(offset) < uint32(2+length) {
+			continue
+		}
+
+		// Extract the type
+		nvType := binary.BigEndian.Uint16(frameBuf[2:])
+
+		switch nvType {
+		case 0:
+			// We just received a keep alive from the server
+			break
+		case 1:
+			// We just received an ethernet frame from the server
+			dlog.Printf("length: %d -- type: %d\n", length, nvType)
+
+			dlog.Printf("DST MAC: %02x:%02x:%02x:%02x:%02x:%02x\n",
+				frameBuf[4:5],
+				frameBuf[5:6],
+				frameBuf[6:7],
+				frameBuf[7:8],
+				frameBuf[8:9],
+				frameBuf[9:10])
+
+			dlog.Printf("SRC MAC: %02x:%02x:%02x:%02x:%02x:%02x\n",
+				frameBuf[10:11],
+				frameBuf[11:12],
+				frameBuf[12:13],
+				frameBuf[13:14],
+				frameBuf[14:15],
+				frameBuf[15:16])
+
+			etherType := binary.BigEndian.Uint16(frameBuf[16:18])
+			dlog.Printf("Ethertype %04x\n", etherType)
+
+			// ARP -> 0x0806
+			// IP  -> 0x0800
+
+			b, err := utun.Write(frameBuf[4+14 : offset])
+			if err != nil {
+				elog.Printf("failed to write to the utun device: %v\n", err)
+			}
+			dlog.Printf("wrote %d bytes to the utun device\n", b)
+
+		default:
+			return
+		}
+
+		offset = 0
+	}
 }
 
 func connectNetwork(networkName string) {
@@ -726,6 +882,52 @@ func main() {
 	} else if *list == true {
 		listNetworks()
 	} else if *connect != "" {
+
+		gMAC = genMAC()
+
+		config := water.Config{
+			DeviceType: water.TUN,
+		}
+		var err error
+		config.Name = utunName
+		utun, err = water.New(config)
+		if err != nil {
+			elog.Fatalf("failed to initialize the %s interface: %v\n", utunName, err)
+		}
+
+		go func() {
+			frameBuf := make([]byte, 2000)
+			for {
+				n, err := utun.Read(frameBuf[18:])
+				if err != nil {
+					elog.Printf("failed to read from %s: %v\n", utunName, err)
+				}
+				dlog.Printf("read %d bytes from %s\n", n, utunName)
+
+				// nvHeader lenght value
+				binary.BigEndian.PutUint16(frameBuf[0:2], uint16(n+14+2))
+				// nvHeader type frame
+				binary.BigEndian.PutUint16(frameBuf[2:4], 1)
+
+				// DST MAC address
+				binary.BigEndian.PutUint16(frameBuf[4:6], 0x9a36)
+				binary.BigEndian.PutUint16(frameBuf[6:8], 0x31ee)
+				binary.BigEndian.PutUint16(frameBuf[8:10], 0xe9d4)
+
+				// SRC MAC address
+				copy(frameBuf[10:16], gMAC[0:6])
+
+				// EtherType IP
+				binary.BigEndian.PutUint16(frameBuf[16:18], 0x0800)
+
+				b, err := vswitchConn.Write(frameBuf[0 : n+14+4])
+				if err != nil {
+					elog.Printf("failed to write frame to %s\n", utunName)
+				}
+				dlog.Printf("wrote %d bytes to %s\n", b, utunName)
+			}
+		}()
+
 		for {
 			connectNetwork(*connect)
 			time.Sleep(3 * time.Second)
