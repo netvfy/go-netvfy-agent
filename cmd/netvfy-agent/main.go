@@ -140,6 +140,18 @@ func genMAC() []byte {
 	return mac
 }
 
+func getOutboundIP() string {
+	conn, err := net.Dial("udp", "8.8.8.8:80")
+	if err != nil {
+		elog.Fatalf("failed get the outbound IP: %v\n", err)
+	}
+	defer conn.Close()
+
+	localAddr := conn.LocalAddr().(*net.UDPAddr)
+
+	return localAddr.IP.String()
+}
+
 func provisioning(provLink string, netLabel string) {
 
 	var netConf netvfyConfig
@@ -330,12 +342,30 @@ func connController(ctx context.Context, cancel context.CancelFunc, ctrlInfo *co
 	dlog.Printf("controller: mutual: %v\n", state.NegotiatedProtocolIsMutual)
 
 	// Create a node info object with our information
+	outboundIP := getOutboundIP()
+	mac := net.HardwareAddr(gMAC)
+
+	uname := ""
+	cmd := exec.Command("uname", "-a")
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	err = cmd.Run()
+	if err != nil {
+		elog.Printf("faled to get `uname -a`: %v\n", err)
+	} else {
+		uname = out.String()
+	}
+
+	dlog.Printf("outbound IP: %s\n", outboundIP)
+	dlog.Printf("mac address: %s\n", mac.String())
+	dlog.Printf("uname -a: %s\n", uname)
+
 	// FIXME fetch local information
 	nodeInfo := &nodeInformation{
 		Action:       "nodeinfo",
-		LocalIPaddr:  "172.16.241.122",
-		Sysname:      "osx something",
-		LLaddr:       "de:ad:be:ef:c0:f3",
+		LocalIPaddr:  outboundIP,
+		Sysname:      uname,
+		LLaddr:       mac.String(),
 		AgentVersion: "gc1.3",
 	}
 
