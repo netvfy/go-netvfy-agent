@@ -11,7 +11,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	water "github.com/netvfy/tuntap"
@@ -24,27 +23,6 @@ type IPConfig struct {
 	Addr    string
 	Subnet  string
 }
-
-// arpTable is concurrent-safe ARP hashmap matching string IPv4 address to MAC addresses
-var ArpTable sync.Map
-
-type ArpEntry struct {
-	Mac       net.HardwareAddr
-	Status    ArpStatus
-	Timestamp time.Time
-}
-
-// ArpStatus indicates if ARP has been sent or not
-type ArpStatus int
-
-const (
-	// Waiting indicates still waiting for an ARP response
-	StatusWaiting ArpStatus = iota //0
-	// Success indicates ARP response was received
-	StatusReady // 1
-	// Stale Indicates timeout has been exceeded
-	StatusStale // 2
-)
 
 // generic wrapper to run command
 func runCmd(name string, cmd *exec.Cmd) error {
