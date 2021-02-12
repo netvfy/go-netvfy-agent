@@ -196,9 +196,9 @@ func main() {
 	// TODO(sneha): can use waitgroup or actor model of multiple goroutines to make this far far cleaner,
 	// handle SIGTERM, cleanup, context cancellation etc.
 
-	//goroutine #1 - read from tun interface
+	//goroutine #1 - egress traffic from tun -> switch
 	go func() {
-		fmt.Println("reading from tap...")
+		fmt.Println("egress traffic handling...")
 		for {
 			buff := make([]byte, 1518)
 			_, err := ifce.Read(buff[14:])
@@ -207,29 +207,17 @@ func main() {
 				log.Printf("unable to read from iface: %v", err)
 				continue
 			}
+
 			egressBuffer <- buff
 		}
 	}()
 
-	// goroutine #2 - write to tun interface
+	// goroutine #2 - ingress traffic from switch -> tun
 	go func() {
-		fmt.Println("writing to tap...")
+		fmt.Println("ingress traffic handling...")
+		//TODO: do we specify our switch only works for IPv4?
 		for {
-			buff := <-ingressBuffer
-			fmt.Println("outgoing write...")
-			_, err := ifce.Write(buff)
-			if err != nil {
-				log.Printf("there is an error writing: %v", err)
-			}
-		}
-	}()
-
-	// goroutine #3 - read from conn interface
-	// TODO(sneha): need to make far cleaner but for now can test this way
-	go func() {
-		fmt.Println("reading from switch...")
-		for {
-			fmt.Println("incoming from tcpconn...")
+			// TODO(using fake encapsulated ARP packet for testing)
 			hdr := ipv4.Header{
 				Version:  ipv4.Version,
 				Len:      ipv4.HeaderLen + 4,
@@ -248,12 +236,19 @@ func main() {
 				fmt.Printf("unable to parse header: %v\n", err)
 				continue
 			}
-			ingressBuffer <- buff
+
+			// case #1 - ARP reply
+
+			// case #2 - standard frame
+			fmt.Println("outgoing write...")
+			_, err := ifce.Write(buff)
+			if err != nil {
+				log.Printf("there is an error writing: %v", err)
+			}
+
 			time.Sleep(2 * time.Second)
 		}
 	}()
-
-	//TODO: do we specify our switch only works for IPv4?
 
 	// goroutine #4 - write to conn interface
 	// TODO(sneha): need to write but for now will printout
@@ -278,6 +273,7 @@ func main() {
 			entry, ok := ArpTable.Load(ipv4.String())
 			if !ok {
 				ArpTable.Store(ipv4.String(), ArpEntry{Status: StatusReady, Timestamp: time.Now()})
+				// TODO send out ARP and write to ARP doubly linked list
 				egressWaitBuffer <- buff
 				continue
 			}
