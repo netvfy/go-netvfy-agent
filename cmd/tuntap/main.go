@@ -14,7 +14,6 @@ import (
 	"time"
 
 	water "github.com/netvfy/tuntap"
-	ipv4 "golang.org/x/net/ipv4"
 )
 
 // IPConfig contains routing and interface configuration information
@@ -138,6 +137,11 @@ func validateInterface(osName, iface string) bool {
 // 	*water.Interface
 // }
 
+var (
+	etherTypeIPV4 = []byte("\x800")
+	etherTypeARP  = []byte("\x806")
+)
+
 var interfaceFlag string
 
 func main() {
@@ -186,11 +190,6 @@ func main() {
 	log.Println("starting the tun/tap listener...")
 	log.Printf("Note traffic must be sourced from IP of iface like so: ping -S %v %v\n", addr, exampleDst)
 
-	buffLen := 100
-	waitBuffLen := 1000
-	ingressBuffer := make(chan []byte, buffLen)
-	egressBuffer := make(chan []byte, buffLen)
-	egressWaitBuffer := make(chan []byte, waitBuffLen)
 	done := make(chan int, 1)
 
 	// TODO(sneha): can use waitgroup or actor model of multiple goroutines to make this far far cleaner,
@@ -202,13 +201,52 @@ func main() {
 		for {
 			buff := make([]byte, 1518)
 			_, err := ifce.Read(buff[14:])
+
 			fmt.Println("incoming read...")
 			if err != nil {
 				log.Printf("unable to read from iface: %v", err)
 				continue
 			}
 
-			egressBuffer <- buff
+			// Grab IP address from buffer
+			// ethernet header - 14 bytes
+			// dst IP starts 16 bytes into IP header
+			rawIP := buff[30:34]
+			var ipv4 net.IP
+			ipv4 = rawIP
+			fmt.Println(ipv4.String())
+
+			// if mac not found in hashtable
+			// add entry and push to arpChannel
+			entry, ok := ArpTable.Load(ipv4.String())
+			// case #1 - no MAC in ARP table
+			if !ok {
+				ArpTable.Store(ipv4.String(), ArpEntry{Status: StatusReady, Timestamp: time.Now()})
+				// TODO send out ARP, add to ARP table, and write to ARP doubly linked list
+				continue
+			}
+			arpEntry := entry.(*ArpEntry)
+			// case #1a - no MAC in ARP table
+			if arpEntry.Status != StatusReady {
+				// If timestamp elapsed is a while, send out ARP again and update timestamp in ARP table
+				continue
+			}
+
+			// case #2 - MAC address in ARP table
+
+			// Add ethernet header
+			// TODO(sneha): change from hardcoded 0 values
+			srcMAC := make([]byte, 6)
+			// add ethernet header
+			copy(buff[0:6], arpEntry.Mac)    //  destination MAC - 6 bytes
+			copy(buff[6:12], srcMAC)         //  source MAC - 6 bytes
+			copy(buff[12:14], etherTypeIPV4) //  ether type - 2 bytes
+
+			len := binary.BigEndian.Uint16(buff[16:18])
+
+			fmt.Println("outgoing to tcpconn...")
+			fmt.Println(buff[0 : 14+len]) // send full ethernet frame (ethernet header, len offset of IPV4 packet)
+
 		}
 	}()
 
@@ -217,25 +255,7 @@ func main() {
 		fmt.Println("ingress traffic handling...")
 		//TODO: do we specify our switch only works for IPv4?
 		for {
-			// TODO(using fake encapsulated ARP packet for testing)
-			hdr := ipv4.Header{
-				Version:  ipv4.Version,
-				Len:      ipv4.HeaderLen + 4,
-				TOS:      1,
-				TotalLen: 0xbef3,
-				ID:       0xcafe,
-				Flags:    ipv4.DontFragment,
-				FragOff:  1500,
-				TTL:      255,
-				Protocol: 1,
-				Checksum: 0xdead,
-				Src:      net.ParseIP("198.18.0.5"), Dst: net.ParseIP("198.18.0.1"),
-			}
-			buff, err := hdr.Marshal()
-			if err != nil {
-				fmt.Printf("unable to parse header: %v\n", err)
-				continue
-			}
+			// get test generated stuff
 
 			// case #1 - ARP reply
 
@@ -250,78 +270,7 @@ func main() {
 		}
 	}()
 
-	// goroutine #4 - write to conn interface
-	// TODO(sneha): need to write but for now will printout
-	go func() {
-		fmt.Println("writing to switch...")
-		for {
-			buff := <-egressBuffer
-			// TODO(sneha): check ARP cache
-			// If no ARP cache, send out ARP broadcast and wait for reply
-			// Source: https://flylib.com/books/en/3.475.1.78/1/
-
-			// Grab IP address from buffer
-			// ethernet header - 14 bytes
-			// dst IP starts 16 bytes into IP header
-			rawIP := buff[30:34]
-			var ipv4 net.IP
-			ipv4 = rawIP
-			fmt.Println(ipv4.String())
-
-			// if mac not found in hashtable
-			// add entry and push to arpChannel
-			entry, ok := ArpTable.Load(ipv4.String())
-			if !ok {
-				ArpTable.Store(ipv4.String(), ArpEntry{Status: StatusReady, Timestamp: time.Now()})
-				// TODO send out ARP and write to ARP doubly linked list
-				egressWaitBuffer <- buff
-				continue
-			}
-			arpEntry := entry.(*ArpEntry)
-			if arpEntry.Status != StatusReady {
-				continue
-			}
-
-			// Frame is of this struct
-			// Ethernet Header
-			//  destination MAC - 6 bytes
-			//  source MAC - 6 bytes
-			//  ether type - 2 bytes
-			// IP Header
-			//  version + IHL - 1 byte
-			//  DSCP + ECN - 1 byte
-			//  Total IP packet length (plus header) - 2 bytes
-			// Payload
-
-			// Add ethernet header
-			etherType := []byte("\x800")
-			srcMAC := make([]byte, 6) // TODO(sneha): change from hardcoded 0 values
-
-			// add ethernet header
-			copy(buff[0:6], arpEntry.Mac)
-			copy(buff[6:12], srcMAC)
-			copy(buff[12:14], etherType)
-
-			len := binary.BigEndian.Uint16(buff[16:18])
-
-			fmt.Println("outgoing to tcpconn...")
-			fmt.Println(buff[0 : 14+len])
-		}
-	}()
-
-	go func() {
-		// read from ARP channel and try arping while awaiting a response
-		//buff := <-egressWaitBuffer
-
-		// grab IP
-
-		// craft ARP packet
-
-		// send ARP and await response
-		// - should this be blocking while awaiting ARP response?
-		// - is spinning up a new gourtine here better or can this be done above?
-	}()
-
+	// goroutine #3 - slow process
 	go func() {
 		// check ARP table for stale entries - based on default timeout issue
 	}()
