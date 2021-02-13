@@ -228,7 +228,7 @@ func main() {
 			arpEntry := entry.(*ArpEntry)
 			// case #1a - no MAC in ARP table
 			if arpEntry.Status != StatusReady {
-				// If timestamp elapsed is a while, send out ARP again and update timestamp in ARP table
+				// TODO - If timestamp elapsed is a while, send out ARP again and update timestamp in ARP table
 				continue
 			}
 
