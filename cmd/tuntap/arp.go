@@ -36,4 +36,10 @@ type ARPQueue struct {
 	sync.Mutex
 	// embedded container list
 	list.List
+	// max length of buffer
+	length int
+}
+
+func (q *ARPQueue) Add(buff []byte) {
+
 }
