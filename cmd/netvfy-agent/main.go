@@ -122,6 +122,7 @@ var vswitchConn *tls.Conn
 var gMAC []byte
 
 const utunName = "utun7"
+const randomInternetIP = "8.8.8.8:80"
 
 func genMAC() []byte {
 
@@ -138,6 +139,18 @@ func genMAC() []byte {
 	mac[0] &= 0b11111110
 
 	return mac
+}
+
+func getOutboundIP() string {
+	conn, err := net.Dial("udp", randomInternetIP)
+	if err != nil {
+		elog.Fatalf("failed get the outbound IP: %v\n", err)
+	}
+	defer conn.Close()
+
+	localAddr := conn.LocalAddr().(*net.UDPAddr)
+
+	return localAddr.IP.String()
 }
 
 func provisioning(provLink string, netLabel string) {
@@ -330,13 +343,30 @@ func connController(ctx context.Context, cancel context.CancelFunc, ctrlInfo *co
 	dlog.Printf("controller: mutual: %v\n", state.NegotiatedProtocolIsMutual)
 
 	// Create a node info object with our information
-	// FIXME fetch local information
+	outboundIP := getOutboundIP()
+	mac := net.HardwareAddr(gMAC)
+
+	uname := ""
+	cmd := exec.Command("uname", "-a")
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	err = cmd.Run()
+	if err != nil {
+		elog.Printf("failed to get `uname -a`: %v\n", err)
+	} else {
+		uname = out.String()
+	}
+
+	dlog.Printf("outbound IP: %s\n", outboundIP)
+	dlog.Printf("mac address: %s\n", mac.String())
+	dlog.Printf("uname -a: %s\n", uname)
+
 	nodeInfo := &nodeInformation{
 		Action:       "nodeinfo",
-		LocalIPaddr:  "172.16.241.122",
-		Sysname:      "osx something",
-		LLaddr:       "de:ad:be:ef:c0:f3",
-		AgentVersion: "gc1.3",
+		LocalIPaddr:  outboundIP,
+		Sysname:      uname,
+		LLaddr:       mac.String(),
+		AgentVersion: "go-0.1c1",
 	}
 
 	jnodeInfo, err := json.Marshal(nodeInfo)
@@ -622,6 +652,7 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 			// ARP -> 0x0806
 			// IP  -> 0x0800
 
+			// FIXME: handle fragmented frames
 			b, err := utun.Write(frameBuf[4+14 : offset])
 			if err != nil {
 				elog.Printf("failed to write to the utun device: %v\n", err)
