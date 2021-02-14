@@ -367,7 +367,7 @@ func connController(ctx context.Context, cancel context.CancelFunc, ctrlInfo *co
 		LocalIPaddr:  outboundIP,
 		Sysname:      uname,
 		LLaddr:       mac.String(),
-		AgentVersion: "gc1.3",
+		AgentVersion: "go-0.1c1",
 	}
 
 	jnodeInfo, err := json.Marshal(nodeInfo)
