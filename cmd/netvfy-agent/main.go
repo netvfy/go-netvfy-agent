@@ -122,6 +122,7 @@ var vswitchConn *tls.Conn
 var gMAC []byte
 
 const utunName = "utun7"
+const randomInternetIP = "8.8.8.8:80"
 
 func genMAC() []byte {
 
@@ -141,7 +142,7 @@ func genMAC() []byte {
 }
 
 func getOutboundIP() string {
-	conn, err := net.Dial("udp", "8.8.8.8:80")
+	conn, err := net.Dial("udp", randomInternetIP)
 	if err != nil {
 		elog.Fatalf("failed get the outbound IP: %v\n", err)
 	}
@@ -351,7 +352,7 @@ func connController(ctx context.Context, cancel context.CancelFunc, ctrlInfo *co
 	cmd.Stdout = &out
 	err = cmd.Run()
 	if err != nil {
-		elog.Printf("faled to get `uname -a`: %v\n", err)
+		elog.Printf("failed to get `uname -a`: %v\n", err)
 	} else {
 		uname = out.String()
 	}
@@ -652,6 +653,7 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 			// ARP -> 0x0806
 			// IP  -> 0x0800
 
+			// FIXME: handle fragmented frames
 			b, err := utun.Write(frameBuf[4+14 : offset])
 			if err != nil {
 				elog.Printf("failed to write to the utun device: %v\n", err)
