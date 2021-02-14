@@ -361,7 +361,6 @@ func connController(ctx context.Context, cancel context.CancelFunc, ctrlInfo *co
 	dlog.Printf("mac address: %s\n", mac.String())
 	dlog.Printf("uname -a: %s\n", uname)
 
-	// FIXME fetch local information
 	nodeInfo := &nodeInformation{
 		Action:       "nodeinfo",
 		LocalIPaddr:  outboundIP,
