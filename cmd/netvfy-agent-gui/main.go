@@ -37,14 +37,14 @@ func onReady() {
 	mVersion.Disable()
 
 	systray.AddSeparator()
-	mQuitOrig := systray.AddMenuItem("Quit", "")
+	mQuit := systray.AddMenuItem("Quit", "")
 
 	for {
 		select {
 		case <-mDisconnect.ClickedCh:
 		case <-mURL.ClickedCh:
 			exec.Command("open", "https://netvfy.com").Start()
-		case <-mQuitOrig.ClickedCh:
+		case <-mQuit.ClickedCh:
 			systray.Quit()
 			return
 		}
