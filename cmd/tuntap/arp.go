@@ -11,7 +11,9 @@ import (
 )
 
 // ArpTable is thread-safe ARP hashmap matching string IPv4 address to MAC addresses.
-type ArpTable sync.Map
+type ArpTable struct {
+	ArpMap sync.Map
+}
 
 // ArpEntry contains IP to MAC addressing mapping determined via ARP protocol.
 type ArpEntry struct {
@@ -33,23 +35,42 @@ const (
 	StatusStale // 2
 )
 
-// Add
-func (t *ArpTable) Add(IP string, mac net.HardwareAddr) error {
+// Add adds a new nil ArpEntry to the ArpTable syncmap.
+func (t *ArpTable) Add(IP string) error {
+	if IP == "" {
+		return errors.New("valid IP address must be provided")
+	}
+
+	ip := net.ParseIP(IP)
+	t.ArpMap.Store(IP, &ArpEntry{IP: ip, Mac: nil, Status: StatusWaiting, Timestamp: time.Now()})
 	return nil
 }
 
-// Update
+// Update updates an ArpEntry in the ArpTable syncmap.
 func (t *ArpTable) Update(IP string, mac net.HardwareAddr) error {
+	if IP == "" {
+		return errors.New("valid IP address must be provided")
+	}
+	ip := net.ParseIP(IP)
+	t.ArpMap.Store(IP, &ArpEntry{IP: ip, Mac: mac, Status: StatusReady, Timestamp: time.Now()})
 	return nil
 }
 
-// Get
-func (t *ArpTable) Get(IP string) error {
-	return nil
+// Get retrieves an ArpEntry in the ArpTable syncmap.
+func (t *ArpTable) Get(IP string) (*ArpEntry, bool, error) {
+	if IP == "" {
+		return nil, false, errors.New("valid IP address must be provided")
+	}
+	arpEntry, found := t.ArpMap.Load(IP)
+	return arpEntry, found, nil
 }
 
-// Remove
+// Remove removes an ArpEntry in the ArpTable syncmap.
 func (t *ArpTable) Remove(IP string) error {
+	if IP == "" {
+		return errors.New("valid IP address must be provided")
+	}
+	t.ArpMap.Delete(IP)
 	return nil
 }
 
