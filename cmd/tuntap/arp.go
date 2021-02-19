@@ -61,7 +61,15 @@ func (t *ArpTable) Get(IP string) (*ArpEntry, bool, error) {
 	if IP == "" {
 		return nil, false, errors.New("valid IP address must be provided")
 	}
-	arpEntry, found := t.ArpMap.Load(IP)
+	rawEntry, found := t.ArpMap.Load(IP)
+	if !found {
+		return nil, false, nil
+	}
+
+	arpEntry, ok := rawEntry.(*ArpEntry)
+	if !ok {
+		return nil, false, errors.New("invalid ARP entry type")
+	}
 	return arpEntry, found, nil
 }
 
@@ -96,8 +104,8 @@ func NewARPQueue(length int) (*ARPQueue, error) {
 
 // Add creates an entry and removes the oldest entry in the ARPQueue if queue length overflowed.
 func (q *ARPQueue) Add(buff []byte) {
-	q.Lock()
-	defer q.Unlock()
+	q.Mutex.Lock()
+	defer q.Mutex.Unlock()
 	// TODO
 	// If overflowed, remove back
 	if q.Len() > q.length {
