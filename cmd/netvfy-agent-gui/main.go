@@ -3,11 +3,21 @@ package main
 import (
 	"os/exec"
 
+	agent "github.com/netvfy/go-netvfy-agent"
+
 	"github.com/getlantern/systray"
 )
 
-func main() {
-	systray.Run(onReady, nil)
+func listNetworks(subMenuConnectNetwork *systray.MenuItem) {
+
+	var i int
+
+	path := agent.GetNdbPath()
+	ndb, _ := agent.FetchNetworks(path)
+
+	for i = 0; i < len(ndb.Networks); i++ {
+		subMenuConnectNetwork.AddSubMenuItem(ndb.Networks[i].Name, "")
+	}
 }
 
 func onReady() {
@@ -18,8 +28,7 @@ func onReady() {
 	mDisconnect.Disable()
 
 	subMenuConnectNetwork := systray.AddMenuItem("Connect to network", "")
-	subMenuConnectNetwork.AddSubMenuItem("my network", "")
-	subMenuConnectNetwork.AddSubMenuItem("my other network", "")
+	listNetworks(subMenuConnectNetwork)
 
 	systray.AddSeparator()
 
@@ -49,4 +58,8 @@ func onReady() {
 			return
 		}
 	}
+}
+
+func main() {
+	systray.Run(onReady, nil)
 }
