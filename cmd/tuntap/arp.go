@@ -108,8 +108,8 @@ func NewARPQueue(length int) (*ARPQueue, error) {
 
 // Add creates an entry and removes the oldest entry in the ARPQueue if queue length overflowed.
 func (q *ARPQueue) Add(buff []byte) {
-	q.Mutex.Lock()
-	defer q.Mutex.Unlock()
+	q.Lock()
+	defer q.Unlock()
 	// TODO
 	// If overflowed, remove back
 	if q.Len() > q.length {
@@ -138,6 +138,7 @@ func Send(conn net.Conn) func(buff []byte) error {
 
 // IterateAndRun take a function and passes all matched frames to it.
 // This makes it far easier to test the iteration functionality.
+// TODO(sneha): iteration is a bit broken
 func (q *ARPQueue) IterateAndRun(ip net.IP, fn func([]byte) error) {
 	q.Lock()
 	defer q.Unlock()
@@ -176,8 +177,6 @@ func (q *ARPQueue) IterateAndRun(ip net.IP, fn func([]byte) error) {
 			// TODO(sneha): print out function
 		}
 
-		eOld := e
-		e = e.Next().Next()
-		q.List.Remove(eOld)
+		e = e.Next()
 	}
 }
