@@ -223,7 +223,7 @@ func main() {
 			// case #1 - no MAC in ARP table
 			if !ok {
 				arpTable.Add(ipv4.String())
-				// TODO send out ARP, add to ARP table, and write to ARP doubly linked list
+				// TODO send out ARP, add to ARP table, and write to ARPQueue
 				continue
 			}
 			// case #1a - no MAC in ARP table
@@ -242,11 +242,11 @@ func main() {
 			copy(buff[6:12], srcMAC)         //  source MAC - 6 bytes
 			copy(buff[12:14], etherTypeIPV4) //  ether type - 2 bytes
 
+			// TODO - there might be a difference btw host socket byte order and network byte order
 			len := binary.BigEndian.Uint16(buff[16:18])
 
 			fmt.Println("outgoing to tcpconn...")
 			fmt.Println(buff[0 : 14+len]) // send full ethernet frame (ethernet header, len offset of IPV4 packet)
-
 		}
 	}()
 

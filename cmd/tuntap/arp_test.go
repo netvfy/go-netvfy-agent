@@ -158,15 +158,16 @@ func TestArpQueue_Add(t *testing.T) {
 		t.Fatalf("unable to create NewARPQueue: %v", err)
 	}
 
-	queue.Add(testBuff)
+	queue.Add(testIP, testBuff)
 
 	if queue.Len() != 1 {
 		t.Fatal("unexpected queue length")
 	}
+
+	// TODO(Sneha): try to overflow and confirm behaving as expected
 }
 
 // TestArpQueue tests the basic SendAndRemove functionality of ArpQueue.
-// TODO - FIX THIS TEST to essential test the iteration components
 func TestArpQueue_Iterate(t *testing.T) {
 	// generate test frame
 	buff, err := generateTestFrame()
@@ -180,8 +181,8 @@ func TestArpQueue_Iterate(t *testing.T) {
 		t.Fatalf("unable to create queue: %v", err)
 	}
 
-	queue.Add(buff)
-	queue.Add(buff)
+	queue.Add(testIP, buff)
+	queue.Add(testIP, buff)
 
 	len := queue.Len()
 	if len != 2 {
@@ -194,7 +195,7 @@ func TestArpQueue_Iterate(t *testing.T) {
 		return nil
 	}
 
-	queue.IterateAndRun(net.ParseIP(testIP), fn)
+	queue.IterateAndRun(testIP, fn)
 
 	count := 0
 	for elem := range sentMessages {
@@ -211,4 +212,6 @@ func TestArpQueue_Iterate(t *testing.T) {
 	if len != 0 {
 		t.Fatalf("unexpected queue length: %v", len)
 	}
+
+	// TODO - add timeout in case test gets stuck on trying to parse from buffered channel
 }

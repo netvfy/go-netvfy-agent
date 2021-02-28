@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"container/list"
 	"encoding/binary"
 	"errors"
@@ -12,7 +11,7 @@ import (
 	"time"
 )
 
-// ArpTable is thread-safe ARP hashmap matching string IPv4 address to MAC addresses.
+// ArpTable is thread-safe ARP hashmap matching string IPv4 address to ArpEntries.
 type ArpTable struct {
 	ArpMap sync.Map
 }
@@ -84,7 +83,7 @@ func (t *ArpTable) Remove(IP string) error {
 	return nil
 }
 
-// ARPQueue is a thread-safe doubly-linked list buffer of IP addresses waiting for ARP responses.
+// ARPQueue is a thread-safe doubly-linked list buffer of ArpQueueEntries awaiting ARP replies.
 type ARPQueue struct {
 	// embedded mutex
 	sync.Mutex
@@ -94,6 +93,12 @@ type ARPQueue struct {
 	length int
 	// logger
 	ll log.Logger
+}
+
+// ArpQueueEntry has string representation of IP along with buffers
+type ArpQueueEntry struct {
+	IP   string
+	buff []byte
 }
 
 // NewARPQueue creates and returns a new doubly-linked list of type ARPQueue.
@@ -107,7 +112,7 @@ func NewARPQueue(length int) (*ARPQueue, error) {
 }
 
 // Add creates an entry and removes the oldest entry in the ARPQueue if queue length overflowed.
-func (q *ARPQueue) Add(buff []byte) {
+func (q *ARPQueue) Add(IP string, buff []byte) {
 	q.Lock()
 	defer q.Unlock()
 	// TODO
@@ -117,7 +122,7 @@ func (q *ARPQueue) Add(buff []byte) {
 		q.List.Remove(eOld)
 	}
 	// Add to front
-	q.List.PushFront(buff)
+	q.List.PushFront(&ArpQueueEntry{IP, buff})
 }
 
 // Len return the current length of the container list.
@@ -139,44 +144,57 @@ func Send(conn net.Conn) func(buff []byte) error {
 // IterateAndRun take a function and passes all matched frames to it.
 // This makes it far easier to test the iteration functionality.
 // TODO(sneha): iteration is a bit broken
-func (q *ARPQueue) IterateAndRun(ip net.IP, fn func([]byte) error) {
+func (q *ARPQueue) IterateAndRun(ip string, fn func([]byte) error) {
 	q.Lock()
 	defer q.Unlock()
 
 	fmt.Println("Starting shit here")
+	count := 0
 	// Note: We are implementing no retries.
 	e := q.List.Front()
 	for e != nil {
+		if count == 5 {
+			break
+		}
+
 		fmt.Println("are we here a")
-		buff, ok := e.Value.([]byte)
+		entry, ok := e.Value.(*ArpQueueEntry)
 		if !ok {
+			fmt.Println("is thi happening")
 			// TODO: log that this is invalid
-			eOld := e
-			e = e.Next().Next()
-			q.List.Remove(eOld)
+			eTemp := e.Next()
+			q.List.Remove(e)
+			e = eTemp
+			count++
 			continue
 		}
 
 		// Validate the frame length is at least 34 bytes or some minimum number
-		if len(buff) < 34 {
-			eOld := e
-			e = e.Next().Next()
-			q.List.Remove(eOld)
+		if len(entry.buff) < 34 {
+			eTemp := e.Next()
+			q.List.Remove(e)
+			e = eTemp
+			count++
 			continue
 		}
 
-		if bytes.Compare(buff[30:34], ip) != 0 {
+		if entry.IP != ip {
+			e = e.Next()
+			count++
 			continue
 		}
 
 		// If there is a match, send out bytes
-		len := binary.BigEndian.Uint16(buff[16:18])
+		// TODO - cannot seem to properly parse this at all- endianness issue?
+		len := binary.BigEndian.Uint16(entry.buff[16:18])
+		fmt.Println(len)
 		fmt.Println("adding code in here")
-		err := fn(buff[0 : 14+len])
+		err := fn(entry.buff[0 : 14+len])
 		if err != nil {
-			// TODO(sneha): print out function
+			// TODO(sneha): log an error
 		}
 
 		e = e.Next()
+		count++
 	}
 }
