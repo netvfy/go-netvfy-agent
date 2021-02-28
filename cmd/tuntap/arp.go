@@ -116,7 +116,6 @@ func (q *ARPQueue) Add(buff []byte) {
 		eOld := q.List.Back()
 		q.List.Remove(eOld)
 	}
-
 	// Add to front
 	q.List.PushFront(buff)
 }
@@ -143,9 +142,11 @@ func (q *ARPQueue) IterateAndRun(ip net.IP, fn func([]byte) error) {
 	q.Lock()
 	defer q.Unlock()
 
+	fmt.Println("Starting shit here")
 	// Note: We are implementing no retries.
 	e := q.List.Front()
 	for e != nil {
+		fmt.Println("are we here a")
 		buff, ok := e.Value.([]byte)
 		if !ok {
 			// TODO: log that this is invalid
@@ -169,6 +170,7 @@ func (q *ARPQueue) IterateAndRun(ip net.IP, fn func([]byte) error) {
 
 		// If there is a match, send out bytes
 		len := binary.BigEndian.Uint16(buff[16:18])
+		fmt.Println("adding code in here")
 		err := fn(buff[0 : 14+len])
 		if err != nil {
 			// TODO(sneha): print out function

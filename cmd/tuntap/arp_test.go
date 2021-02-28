@@ -1,11 +1,9 @@
 package main
 
 import (
-	"errors"
 	"net"
 	"reflect"
 	"testing"
-	"time"
 )
 
 // TestArpTable tests creation of arptable, addition, and removal of values.
@@ -176,47 +174,41 @@ func TestArpQueue_Iterate(t *testing.T) {
 		t.Fatalf("unable to generate test frame: %v", buff)
 	}
 
-	// start client and server
-	reader, writer := net.Pipe()
-	defer func() {
-		reader.Close()
-		writer.Close()
-	}()
-
 	// create ArpQueue and add
-	queue, err := NewARPQueue(1)
+	queue, err := NewARPQueue(2)
 	if err != nil {
 		t.Fatalf("unable to create queue: %v", err)
 	}
 
 	queue.Add(buff)
+	queue.Add(buff)
 
-	readErr := make(chan error, 1)
-	done := make(chan int, 1)
-	timer := time.NewTimer(time.Second * 2)
+	len := queue.Len()
+	if len != 2 {
+		t.Fatalf("unexpected buffer length: %v", len)
+	}
 
-	queue.SendAndRemove(writer, net.ParseIP("198.18.0.1"))
+	sentMessages := make(chan []byte, 10)
+	fn := func(buff []byte) error {
+		sentMessages <- buff
+		return nil
+	}
 
-	recvBuff := make([]byte, 1518)
-	go func() {
-		for {
-			_, err := reader.Read(recvBuff)
-			if err != nil {
-				readErr <- err
-			}
-			if reflect.DeepEqual(recvBuff, buff) {
-				readErr <- errors.New("unequal received buffer")
-			}
-			<-done
+	queue.IterateAndRun(net.ParseIP(testIP), fn)
+
+	count := 0
+	for elem := range sentMessages {
+		if !reflect.DeepEqual(elem, buff) {
+			t.Fatalf("unexpected received buffer: %v", elem)
 		}
-	}()
+		if count == 2 {
+			break
+		}
+		count++
+	}
 
-	// Force main thread to wait until either the tests expire, complete, or return an error.
-	select {
-	case err := <-readErr:
-		t.Fatalf("unable to receive frame: %v", err)
-	case <-timer.C:
-		t.Fatalf("test timed out: %v", err)
-	case <-done:
+	len = queue.Len()
+	if len != 0 {
+		t.Fatalf("unexpected queue length: %v", len)
 	}
 }

@@ -8,6 +8,9 @@ import (
 )
 
 /* Note: This file contains utility functions for development and testing. */
+var (
+	testIP = "198.18.0.5"
+)
 
 func generateTestFrame() ([]byte, error) {
 	buff := make([]byte, 1518)
