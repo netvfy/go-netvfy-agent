@@ -43,9 +43,9 @@ func generateTestFrame() ([]byte, error) {
 	copy(buff[12:14], etherTypeIPV4)
 	copy(buff[14:14+hdr.Len], packetBuff)
 
-	fmt.Println(binary.BigEndian.Uint16(buff[16:18]))
+	//fmt.Println(binary.BigEndian.Uint16(buff[16:18]))
 	// TODO - tests are breaking b/c of this -> I can't seem to get the length from the buffered header irrespective of byte order i'm trying
-	fmt.Println(binary.LittleEndian.Uint16(packetBuff[0:2]))
+	//fmt.Println(binary.LittleEndian.Uint16(packetBuff[0:2]))
 	fmt.Println(binary.BigEndian.Uint16(packetBuff[2:4]))
 
 	return buff[0 : 14+hdr.Len], nil
