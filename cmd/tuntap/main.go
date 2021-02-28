@@ -191,6 +191,7 @@ func main() {
 	log.Printf("Note traffic must be sourced from IP of iface like so: ping -S %v %v\n", addr, exampleDst)
 
 	done := make(chan int, 1)
+	arpTable := &ArpTable{}
 
 	// TODO(sneha): can use waitgroup or actor model of multiple goroutines to make this far far cleaner,
 	// handle SIGTERM, cleanup, context cancellation etc.
@@ -218,16 +219,15 @@ func main() {
 
 			// if mac not found in hashtable
 			// add entry and push to arpChannel
-			entry, ok := ArpTable.Load(ipv4.String())
+			entry, ok, _ := arpTable.Get(ipv4.String())
 			// case #1 - no MAC in ARP table
 			if !ok {
-				ArpTable.Store(ipv4.String(), ArpEntry{Status: StatusReady, Timestamp: time.Now()})
+				arpTable.Add(ipv4.String())
 				// TODO send out ARP, add to ARP table, and write to ARP doubly linked list
 				continue
 			}
-			arpEntry := entry.(*ArpEntry)
 			// case #1a - no MAC in ARP table
-			if arpEntry.Status != StatusReady {
+			if entry.Status != StatusReady {
 				// TODO - If timestamp elapsed is a while, send out ARP again and update timestamp in ARP table
 				continue
 			}
@@ -238,7 +238,7 @@ func main() {
 			// TODO(sneha): change from hardcoded 0 values
 			srcMAC := make([]byte, 6)
 			// add ethernet header
-			copy(buff[0:6], arpEntry.Mac)    //  destination MAC - 6 bytes
+			copy(buff[0:6], entry.Mac)       //  destination MAC - 6 bytes
 			copy(buff[6:12], srcMAC)         //  source MAC - 6 bytes
 			copy(buff[12:14], etherTypeIPV4) //  ether type - 2 bytes
 
@@ -261,10 +261,10 @@ func main() {
 
 			// case #2 - standard frame
 			fmt.Println("outgoing write...")
-			_, err := ifce.Write(buff)
-			if err != nil {
-				log.Printf("there is an error writing: %v", err)
-			}
+			// _, err := ifce.Write(buff)
+			// if err != nil {
+			// 	log.Printf("there is an error writing: %v", err)
+			// }
 
 			time.Sleep(2 * time.Second)
 		}

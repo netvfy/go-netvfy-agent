@@ -1,12 +1,14 @@
 package main
 
 import (
+	"errors"
 	"net"
 	"reflect"
 	"testing"
+	"time"
 )
 
-// Test_ArpTable tests creation of arptable, addition, and removal of values.
+// TestArpTable tests creation of arptable, addition, and removal of values.
 func TestArpTable(t *testing.T) {
 	arpTable := &ArpTable{}
 
@@ -147,4 +149,74 @@ func compareArpEntry(e1 *ArpEntry, e2 *ArpEntry) bool {
 	}
 
 	return true
+}
+
+// TestArpQueue tests the basic Add, Len, SendAndRemove functionality of ArpQueue.
+func TestArpQueue_Add(t *testing.T) {
+	testBuff := []byte("test")
+
+	queue, err := NewARPQueue(2)
+	if err != nil {
+		t.Fatalf("unable to create NewARPQueue: %v", err)
+	}
+
+	queue.Add(testBuff)
+
+	if queue.Len() != 1 {
+		t.Fatal("unexpected queue length")
+	}
+}
+
+// TestArpQueue tests the basic SendAndRemove functionality of ArpQueue.
+// TODO - FIX THIS TEST to essential test the iteration components
+func TestArpQueue_Iterate(t *testing.T) {
+	// generate test frame
+	buff, err := generateTestFrame()
+	if err != nil {
+		t.Fatalf("unable to generate test frame: %v", buff)
+	}
+
+	// start client and server
+	reader, writer := net.Pipe()
+	defer func() {
+		reader.Close()
+		writer.Close()
+	}()
+
+	// create ArpQueue and add
+	queue, err := NewARPQueue(1)
+	if err != nil {
+		t.Fatalf("unable to create queue: %v", err)
+	}
+
+	queue.Add(buff)
+
+	readErr := make(chan error, 1)
+	done := make(chan int, 1)
+	timer := time.NewTimer(time.Second * 2)
+
+	queue.SendAndRemove(writer, net.ParseIP("198.18.0.1"))
+
+	recvBuff := make([]byte, 1518)
+	go func() {
+		for {
+			_, err := reader.Read(recvBuff)
+			if err != nil {
+				readErr <- err
+			}
+			if reflect.DeepEqual(recvBuff, buff) {
+				readErr <- errors.New("unequal received buffer")
+			}
+			<-done
+		}
+	}()
+
+	// Force main thread to wait until either the tests expire, complete, or return an error.
+	select {
+	case err := <-readErr:
+		t.Fatalf("unable to receive frame: %v", err)
+	case <-timer.C:
+		t.Fatalf("test timed out: %v", err)
+	case <-done:
+	}
 }

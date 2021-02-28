@@ -5,6 +5,8 @@ import (
 	"container/list"
 	"encoding/binary"
 	"errors"
+	"fmt"
+	"log"
 	"net"
 	"sync"
 	"time"
@@ -82,7 +84,7 @@ func (t *ArpTable) Remove(IP string) error {
 	return nil
 }
 
-// ARPQueue is a thread-safe doubly-linked list buffer of of IP addresses waiting for ARP responses.
+// ARPQueue is a thread-safe doubly-linked list buffer of IP addresses waiting for ARP responses.
 type ARPQueue struct {
 	// embedded mutex
 	sync.Mutex
@@ -90,6 +92,8 @@ type ARPQueue struct {
 	list.List
 	// max length of buffer
 	length int
+	// logger
+	ll log.Logger
 }
 
 // NewARPQueue creates and returns a new doubly-linked list of type ARPQueue.
@@ -122,8 +126,20 @@ func (q *ARPQueue) Len() int {
 	return q.List.Len()
 }
 
-// SendAndRemove take a conn struct to attempt to send and remove all matched frames.
-func (q *ARPQueue) SendAndRemove(conn net.Conn, ip net.IP, hwAddr net.HardwareAddr) {
+// Send returns a generic function to send provided frames to an connection.
+func Send(conn net.Conn) func(buff []byte) error {
+	return func(buff []byte) error {
+		_, err := conn.Write(buff)
+		if err != nil {
+			return fmt.Errorf("unable to send conn: %v", err)
+		}
+		return nil
+	}
+}
+
+// IterateAndRun take a function and passes all matched frames to it.
+// This makes it far easier to test the iteration functionality.
+func (q *ARPQueue) IterateAndRun(ip net.IP, fn func([]byte) error) {
 	q.Lock()
 	defer q.Unlock()
 
@@ -153,9 +169,9 @@ func (q *ARPQueue) SendAndRemove(conn net.Conn, ip net.IP, hwAddr net.HardwareAd
 
 		// If there is a match, send out bytes
 		len := binary.BigEndian.Uint16(buff[16:18])
-		_, err := conn.Write(buff[0 : 14+len])
+		err := fn(buff[0 : 14+len])
 		if err != nil {
-			// TODO log that this is invalid
+			// TODO(sneha): print out function
 		}
 
 		eOld := e

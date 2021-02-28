@@ -4,14 +4,13 @@ import (
 	"fmt"
 	"net"
 
-	ipv4 "golang.org/x/net/ipv4"
+	"golang.org/x/net/ipv4"
 )
 
 /* Note: This file contains utility functions for development and testing. */
 
-func generateTestFrame() []byte {
+func generateTestFrame() ([]byte, error) {
 	buff := make([]byte, 1518)
-	// TODO(using fake encapsulated ARP packet for testing)
 	hdr := ipv4.Header{
 		Version:  ipv4.Version,
 		Len:      ipv4.HeaderLen + 4,
@@ -27,8 +26,7 @@ func generateTestFrame() []byte {
 	}
 	packetBuff, err := hdr.Marshal()
 	if err != nil {
-		fmt.Printf("unable to parse header: %v\n", err)
-		continue
+		return nil, fmt.Errorf("unable to parse header: %v", err)
 	}
 
 	dstMAC := make([]byte, 6)
@@ -38,9 +36,11 @@ func generateTestFrame() []byte {
 	copy(buff[0:6], dstMAC)
 	copy(buff[6:12], srcMAC)
 	copy(buff[12:14], etherTypeIPV4)
+	copy(buff[14:14+hdr.Len], packetBuff)
 
+	return buff, nil
 }
 
-func generateTestARPReply() []byte {
-
-}
+// func generateTestARPReply() []byte {
+//
+// }
