@@ -46,3 +46,46 @@ func FetchNetworks(ndbPath string) (*Ndb, error) {
 
 	return &ndb, nil
 }
+
+func DeleteNetwork(ndbPath string, networkName string) error {
+
+	var i int
+	var ndb Ndb
+	var found bool
+
+	// Read the configuration file
+	byteValue, err := ioutil.ReadFile(ndbPath)
+	if err != nil {
+		return fmt.Errorf("DeleteNetwork: failed to read the configuration file: %v", err)
+	}
+
+	err = json.Unmarshal(byteValue, &ndb)
+	if err != nil {
+		return fmt.Errorf("DeleteNetwork: failed to unmarshal the network configuration: %v", err)
+	}
+
+	// Find the network to delete
+	for i = 0; i < len(ndb.Networks); i++ {
+		if ndb.Networks[i].Name == networkName {
+			ndb.Networks = append(ndb.Networks[:i], ndb.Networks[i+1:]...)
+			found = true
+			break
+		}
+	}
+
+	if found == false {
+		return fmt.Errorf("DeleteNetwork: failed to delete network: `%v`: not found", networkName)
+	}
+
+	marshaledJSON, err := json.MarshalIndent(ndb, "", " ")
+	if err != nil {
+		return fmt.Errorf("DeleteNetwork: failed to marshal the network configuration: %v", err)
+	}
+
+	err = ioutil.WriteFile(ndbPath, marshaledJSON, 0644)
+	if err != nil {
+		return fmt.Errorf("DeleteNetwork: failed to save the network configuration: %v", err)
+	}
+
+	return nil
+}
