@@ -152,8 +152,9 @@ func compareArpEntry(e1 *ArpEntry, e2 *ArpEntry) bool {
 // TestArpQueue tests the basic Add, Len, SendAndRemove functionality of ArpQueue.
 func TestArpQueue_Add(t *testing.T) {
 	testBuff := []byte("test")
+	length := 2
 
-	queue, err := NewARPQueue(2)
+	queue, err := NewARPQueue(length)
 	if err != nil {
 		t.Fatalf("unable to create NewARPQueue: %v", err)
 	}
@@ -164,7 +165,13 @@ func TestArpQueue_Add(t *testing.T) {
 		t.Fatal("unexpected queue length")
 	}
 
-	// TODO(Sneha): try to overflow and confirm behaving as expected
+	queue.Add(testIP2, testBuff)
+	queue.Add(testIP3, testBuff)
+
+	// Check that queue has not overflowed limit
+	if queue.Len() != 2 {
+		t.Fatalf("unexpected queue length: %v", queue.Len())
+	}
 }
 
 // TestArpQueue tests the basic SendAndRemove functionality of ArpQueue.
@@ -197,7 +204,7 @@ func TestArpQueue_Iterate(t *testing.T) {
 
 	queue.IterateAndRun(testIP, fn)
 
-	count := 0
+	count := 1
 	for elem := range sentMessages {
 		if !reflect.DeepEqual(elem, buff) {
 			t.Fatalf("unexpected received buffer: %v", elem)

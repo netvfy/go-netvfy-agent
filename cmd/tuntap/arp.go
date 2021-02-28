@@ -148,24 +148,17 @@ func (q *ARPQueue) IterateAndRun(ip string, fn func([]byte) error) {
 	q.Lock()
 	defer q.Unlock()
 
-	fmt.Println("Starting shit here")
-	count := 0
 	// Note: We are implementing no retries.
 	e := q.List.Front()
 	for e != nil {
-		if count == 5 {
-			break
-		}
-
-		fmt.Println("are we here a")
 		entry, ok := e.Value.(*ArpQueueEntry)
 		if !ok {
-			fmt.Println("is thi happening")
-			// TODO: log that this is invalid
 			eTemp := e.Next()
 			q.List.Remove(e)
 			e = eTemp
-			count++
+
+			// TODO(sneha): properly log here
+			fmt.Sprintln("invalid value in ARPQueue")
 			continue
 		}
 
@@ -174,27 +167,26 @@ func (q *ARPQueue) IterateAndRun(ip string, fn func([]byte) error) {
 			eTemp := e.Next()
 			q.List.Remove(e)
 			e = eTemp
-			count++
+
+			// TODO(sneha): properly log here
+			fmt.Sprintln("invalid frame length")
 			continue
 		}
 
 		if entry.IP != ip {
 			e = e.Next()
-			count++
 			continue
 		}
 
 		// If there is a match, send out bytes
-		// TODO - cannot seem to properly parse this at all- endianness issue?
 		len := binary.BigEndian.Uint16(entry.buff[16:18])
-		fmt.Println(len)
-		fmt.Println("adding code in here")
 		err := fn(entry.buff[0 : 14+len])
 		if err != nil {
-			// TODO(sneha): log an error
+			fmt.Printf("unable to run function: %v\n", err)
 		}
 
-		e = e.Next()
-		count++
+		eTemp := e.Next()
+		q.List.Remove(e)
+		e = eTemp
 	}
 }
