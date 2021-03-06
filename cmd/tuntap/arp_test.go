@@ -4,6 +4,7 @@ import (
 	"net"
 	"reflect"
 	"testing"
+	"time"
 )
 
 // TestArpTable tests creation of arptable, addition, and removal of values.
@@ -151,33 +152,62 @@ func compareArpEntry(e1 *ArpEntry, e2 *ArpEntry) bool {
 
 // TestArpQueue tests the basic Add, Len, SendAndRemove functionality of ArpQueue.
 func TestArpQueue_Add(t *testing.T) {
-	testBuff := []byte("test")
 	length := 2
+
+	testBytes1, err := generateTestFrame(srcIP, testIP1)
+	if err != nil {
+		t.Fatalf("unable to generate testIP frame: %v", err)
+	}
+	testBytes2, err := generateTestFrame(srcIP, testIP2)
+	if err != nil {
+		t.Fatalf("unable to generate testIP frame: %v", err)
+	}
+	testBytes3, err := generateTestFrame(srcIP, testIP3)
+	if err != nil {
+		t.Fatalf("unable to generate testIP frame: %v", err)
+	}
 
 	queue, err := NewARPQueue(length)
 	if err != nil {
 		t.Fatalf("unable to create NewARPQueue: %v", err)
 	}
 
-	queue.Add(testIP, testBuff)
-
+	queue.Add(testIP1, testBytes1)
 	if queue.Len() != 1 {
 		t.Fatal("unexpected queue length")
 	}
 
-	queue.Add(testIP2, testBuff)
-	queue.Add(testIP3, testBuff)
+	queue.Add(testIP2, testBytes2)
+	queue.Add(testIP3, testBytes3)
 
 	// Check that queue has not overflowed limit
 	if queue.Len() != 2 {
 		t.Fatalf("unexpected queue length: %v", queue.Len())
+	}
+
+	// Confirm that value testIP1 no longer exists in the queue
+	found := false
+	e := queue.Front()
+	for e != nil {
+		entry, ok := e.Value.(*ArpQueueEntry)
+		if !ok {
+			t.Fatalf("invalid items in ArpQueue for IP: %v", entry.IP)
+		}
+		if entry.IP == testIP1 {
+			found = true
+		}
+		e = e.Next()
+	}
+
+	if found {
+		t.Fatalf("last added item unexpected not removed from queue: %v", testIP1)
 	}
 }
 
 // TestArpQueue tests the basic SendAndRemove functionality of ArpQueue.
 func TestArpQueue_Iterate(t *testing.T) {
 	// generate test frame
-	buff, err := generateTestFrame()
+	buff, err := generateTestFrame(testIP1, srcIP)
 	if err != nil {
 		t.Fatalf("unable to generate test frame: %v", buff)
 	}
@@ -188,8 +218,8 @@ func TestArpQueue_Iterate(t *testing.T) {
 		t.Fatalf("unable to create queue: %v", err)
 	}
 
-	queue.Add(testIP, buff)
-	queue.Add(testIP, buff)
+	queue.Add(testIP1, buff)
+	queue.Add(testIP1, buff)
 
 	len := queue.Len()
 	if len != 2 {
@@ -202,23 +232,27 @@ func TestArpQueue_Iterate(t *testing.T) {
 		return nil
 	}
 
-	queue.IterateAndRun(testIP, fn)
+	queue.IterateAndRun(testIP1, fn)
+
+	timer1 := time.NewTimer(5 * time.Second)
 
 	count := 1
-	for elem := range sentMessages {
-		if !reflect.DeepEqual(elem, buff) {
-			t.Fatalf("unexpected received buffer: %v", elem)
+	for {
+		select {
+		case msg := <-sentMessages:
+			if !reflect.DeepEqual(msg, buff) {
+				t.Fatalf("unexpected received buffer: %v", msg)
+			}
+			if count == 2 {
+				len = queue.Len()
+				if len != 0 {
+					t.Fatalf("unexpected queue length: %v", len)
+				}
+				return
+			}
+			count++
+		case <-timer1.C:
+			t.Fatal("test timed out without iterating through results")
 		}
-		if count == 2 {
-			break
-		}
-		count++
 	}
-
-	len = queue.Len()
-	if len != 0 {
-		t.Fatalf("unexpected queue length: %v", len)
-	}
-
-	// TODO - add timeout in case test gets stuck on trying to parse from buffered channel
 }

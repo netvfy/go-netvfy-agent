@@ -11,7 +11,8 @@ import (
 
 /* Note: This file contains utility functions for development and testing. */
 var (
-	testIP  = "198.18.0.5"
+	srcIP   = "198.18.0.1"
+	testIP1 = "198.18.0.5"
 	testIP2 = "198.18.0.6"
 	testIP3 = "198.18.0.7"
 )
@@ -49,7 +50,7 @@ type IPv4Header struct {
 
 type HeaderFlags int
 
-// Marshall generates byte slice from IPv4 header in the network byte order (Big Endian).
+// Marshal generates byte slice from IPv4 header in the network byte order (Big Endian).
 func (h *IPv4Header) Marshal() ([]byte, error) {
 	if h == nil {
 		return nil, errors.New("nil header")
@@ -83,7 +84,7 @@ func (h *IPv4Header) Marshal() ([]byte, error) {
 }
 
 // generateTestFrame returns marshalled byte slice in network byte order for testing.
-func generateTestFrame() ([]byte, error) {
+func generateTestFrame(srcIP, dstIP string) ([]byte, error) {
 	buff := make([]byte, 1518)
 	hdr := IPv4Header{
 		Version:  ipv4.Version,
@@ -96,8 +97,8 @@ func generateTestFrame() ([]byte, error) {
 		TTL:      255,
 		Protocol: 1,
 		Checksum: 0xdead,
-		Src:      net.ParseIP("198.18.0.5"),
-		Dst:      net.ParseIP("198.18.0.1"),
+		Src:      net.ParseIP(srcIP),
+		Dst:      net.ParseIP(dstIP),
 	}
 	packetBuff, err := hdr.Marshal()
 	if err != nil {

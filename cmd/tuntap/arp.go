@@ -115,9 +115,9 @@ func NewARPQueue(length int) (*ARPQueue, error) {
 func (q *ARPQueue) Add(IP string, buff []byte) {
 	q.Lock()
 	defer q.Unlock()
-	// TODO
-	// If overflowed, remove back
-	if q.Len() > q.length {
+
+	// If at max length, remove oldest element.
+	if q.Len() == q.length {
 		eOld := q.List.Back()
 		q.List.Remove(eOld)
 	}
@@ -143,7 +143,6 @@ func Send(conn net.Conn) func(buff []byte) error {
 
 // IterateAndRun take a function and passes all matched frames to it.
 // This makes it far easier to test the iteration functionality.
-// TODO(sneha): iteration is a bit broken
 func (q *ARPQueue) IterateAndRun(ip string, fn func([]byte) error) {
 	q.Lock()
 	defer q.Unlock()
