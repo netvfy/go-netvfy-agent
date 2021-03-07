@@ -90,7 +90,7 @@ type ARPQueue struct {
 	// embedded doubly-linked container list
 	list.List
 	// max length of buffer
-	length int
+	length uint
 	// logger
 	ll log.Logger
 }
@@ -102,13 +102,10 @@ type ArpQueueEntry struct {
 }
 
 // NewARPQueue creates and returns a new doubly-linked list of type ARPQueue.
-func NewARPQueue(length int) (*ARPQueue, error) {
-	if length <= 0 {
-		return nil, errors.New("maximum queue length must be greater than 0")
-	}
+func NewARPQueue(length uint) *ARPQueue {
 	return &ARPQueue{
 		length: length,
-	}, nil
+	}
 }
 
 // Add creates an entry and removes the oldest entry in the ARPQueue if queue length overflowed.
@@ -126,8 +123,8 @@ func (q *ARPQueue) Add(IP string, buff []byte) {
 }
 
 // Len return the current length of the container list.
-func (q *ARPQueue) Len() int {
-	return q.List.Len()
+func (q *ARPQueue) Len() uint {
+	return uint(q.List.Len())
 }
 
 // Send returns a generic function to send provided frames to an connection.

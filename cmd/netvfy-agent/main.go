@@ -121,6 +121,16 @@ var gNetConfPath string
 var utun *water.Interface
 var vswitchConn *tls.Conn
 
+var (
+	// arpQueue of waiting frames that is global to main.
+	arpQueue *agent.ARPQueue
+	// arpTable is global to main.
+	arpTable *agent.ARPTable
+)
+
+// queueMax is hard limit of arpQueue entries.
+const arpQueueMax = 50
+
 var gMAC []byte
 
 const utunName = "utun7"
@@ -652,6 +662,8 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 			dlog.Printf("Ethertype %04x\n", etherType)
 
 			// ARP -> 0x0806
+			// TODO(sneha): If this is ARP, tweak ARPTable entry, read from wait Queue and send off.
+
 			// IP  -> 0x0800
 
 			// FIXME: handle fragmented frames
@@ -899,6 +911,10 @@ func main() {
 	ilog = log.New(os.Stdout, "", 0)
 	elog = log.New(os.Stdout, "error: ", log.Ldate|log.Ltime|log.Lshortfile)
 
+	// Setup ARP structs.
+	arpQueue = agent.NewARPQueue(arpQueueMax)
+	arpTable = &agent.ArpTable{}
+
 	gNetConfPath = agent.GetNdbPath()
 
 	if *provLink != "" {
@@ -934,6 +950,30 @@ func main() {
 				// nvHeader type frame
 				binary.BigEndian.PutUint16(frameBuf[2:4], 1)
 
+				var dstIP net.IP
+				dstIP = []byte(frameBuf[30:34])
+				entry, found, err := arpTable.Get(dstIP.String())
+				if err != nil {
+					elog.Printf("unable to retrieve arpEntry for %v: %v", dstIP.String(), err)
+				}
+
+				// TODO(sneha): If not in ARP table, push to ARPQueue, create ARPTable entry with waiting state,
+				// craft ARP request to send off.
+				if !found {
+					err := arpTable.Add(dstIP.String())
+					if err != nil {
+						elog.Printf("unable to add waiting ARP entry: %v", err)
+					}
+
+					arpQueue.Add(dstIP.String(), frameBuf[4:n+14])
+
+					// TODO(sneha): send off ARPRequest
+					// fxn in arp.go to generate arp request?
+
+					continue
+				}
+
+				// TODO(sneha): If in ARP table, craft frame, send off.
 				// DST MAC address
 				binary.BigEndian.PutUint16(frameBuf[4:6], 0x9a36)
 				binary.BigEndian.PutUint16(frameBuf[6:8], 0x31ee)
@@ -945,6 +985,7 @@ func main() {
 				// EtherType IP
 				binary.BigEndian.PutUint16(frameBuf[16:18], 0x0800)
 
+				// TODO(sneha): if vswitchConn is nil, do nothing.
 				b, err := vswitchConn.Write(frameBuf[0 : n+14+4])
 				if err != nil {
 					elog.Printf("failed to write frame to %s\n", utunName)
