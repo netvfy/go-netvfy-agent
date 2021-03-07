@@ -15,7 +15,10 @@ func listNetworks(message *chan string, menuConnectNetwork *cocoa.NSMenu, menuDe
 	var i int
 
 	path := agent.GetNdbPath()
-	ndb, _ := agent.FetchNetworks(path)
+	ndb, err := agent.FetchNetworks(path)
+	if err != nil {
+		return
+	}
 
 	for i = 0; i < len(ndb.Networks); i++ {
 
