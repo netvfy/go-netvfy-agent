@@ -1,4 +1,4 @@
-package ndb
+package agent
 
 import (
 	"encoding/json"
