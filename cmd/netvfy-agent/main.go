@@ -125,7 +125,7 @@ var (
 	// arpQueue of waiting frames that is global to main.
 	arpQueue *agent.ARPQueue
 	// arpTable is global to main.
-	arpTable *agent.ARPTable
+	arpTable *agent.ArpTable
 )
 
 // queueMax is hard limit of arpQueue entries.
