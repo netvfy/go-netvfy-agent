@@ -26,6 +26,8 @@ import (
 	"strings"
 	"time"
 
+	agent "github.com/netvfy/go-netvfy-agent"
+
 	water "github.com/netvfy/tuntap"
 )
 
@@ -862,24 +864,17 @@ func deleteNetwork(networkName string) {
 
 func listNetworks() {
 
-	var netConf netvfyConfig
 	var i int
 
-	// Read the configuration file
-	byteValue, err := ioutil.ReadFile(gNetConfPath)
+	ndb, err := agent.FetchNetworks(gNetConfPath)
 	if err != nil {
-		elog.Fatalf("failed to read the configuration file: %v\n", err)
-	}
-
-	err = json.Unmarshal(byteValue, &netConf)
-	if err != nil {
-		elog.Fatalf("failed to unmarshal the network configuration: %v\n", err)
+		elog.Fatalf("listNetworks: %s\n", err)
 	}
 
 	ilog.Printf("Provisioned Networks:\n")
 	// Find the network in the list
-	for i = 0; i < len(netConf.Networks); i++ {
-		ilog.Printf("\t%s\n", netConf.Networks[i].Name)
+	for i = 0; i < len(ndb.Networks); i++ {
+		ilog.Printf("\t%s\n", ndb.Networks[i].Name)
 	}
 }
 
@@ -904,8 +899,7 @@ func main() {
 	ilog = log.New(os.Stdout, "", 0)
 	elog = log.New(os.Stdout, "error: ", log.Ldate|log.Ltime|log.Lshortfile)
 
-	// FIXME make it work on Windows too
-	gNetConfPath = os.Getenv("HOME") + "/.config/netvfy/nvagent.json"
+	gNetConfPath = agent.GetNdbPath()
 
 	if *provLink != "" {
 		provisioning(*provLink, *netLabel)
