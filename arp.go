@@ -42,8 +42,12 @@ func (t *ArpTable) Add(IP string) error {
 		return errors.New("valid IP address must be provided")
 	}
 
-	ip := net.ParseIP(IP)
-	t.ArpMap.Store(IP, &ArpEntry{IP: ip, Mac: nil, Status: StatusWaiting, Timestamp: time.Now()})
+	// Check if an entry already exist before adding one.
+	_, ok := t.ArpMap.Load(IP)
+	if ok == false {
+		ip := net.ParseIP(IP)
+		t.ArpMap.Store(IP, &ArpEntry{IP: ip, Mac: nil, Status: StatusWaiting, Timestamp: time.Now()})
+	}
 	return nil
 }
 

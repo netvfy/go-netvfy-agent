@@ -945,16 +945,23 @@ func main() {
 				}
 				dlog.Printf("read %d bytes from %s\n", n, utunName)
 
+				if vswitchConn == nil {
+					continue
+				}
+
 				// nvHeader lenght value
 				binary.BigEndian.PutUint16(frameBuf[0:2], uint16(n+14+2))
 				// nvHeader type frame
 				binary.BigEndian.PutUint16(frameBuf[2:4], 1)
+				// src MAC address
+				copy(frameBuf[10:16], gMAC[0:6])
+				// EtherType IP
+				binary.BigEndian.PutUint16(frameBuf[16:18], 0x0800)
 
-				var dstIP net.IP
-				dstIP = []byte(frameBuf[30:34])
+				dstIP := net.IP([]byte(frameBuf[30:34]))
 				entry, found, err := arpTable.Get(dstIP.String())
 				if err != nil {
-					elog.Printf("unable to retrieve arpEntry for %v: %v", dstIP.String(), err)
+					elog.Printf("unable to retrieve ARP entry for %v: %v", dstIP.String(), err)
 				}
 
 				// TODO(sneha): If not in ARP table, push to ARPQueue, create ARPTable entry with waiting state,
@@ -965,7 +972,7 @@ func main() {
 						elog.Printf("unable to add waiting ARP entry: %v", err)
 					}
 
-					arpQueue.Add(dstIP.String(), frameBuf[4:n+14])
+					arpQueue.Add(dstIP.String(), frameBuf[0:4+14+n])
 
 					// TODO(sneha): send off ARPRequest
 					// fxn in arp.go to generate arp request?
@@ -973,20 +980,10 @@ func main() {
 					continue
 				}
 
-				// TODO(sneha): If in ARP table, craft frame, send off.
 				// DST MAC address
-				binary.BigEndian.PutUint16(frameBuf[4:6], 0x9a36)
-				binary.BigEndian.PutUint16(frameBuf[6:8], 0x31ee)
-				binary.BigEndian.PutUint16(frameBuf[8:10], 0xe9d4)
+				copy(frameBuf[4:10], entry.Mac[0:6])
 
-				// SRC MAC address
-				copy(frameBuf[10:16], gMAC[0:6])
-
-				// EtherType IP
-				binary.BigEndian.PutUint16(frameBuf[16:18], 0x0800)
-
-				// TODO(sneha): if vswitchConn is nil, do nothing.
-				b, err := vswitchConn.Write(frameBuf[0 : n+14+4])
+				b, err := vswitchConn.Write(frameBuf[0 : 4+14+n])
 				if err != nil {
 					elog.Printf("failed to write frame to %s\n", utunName)
 				}
