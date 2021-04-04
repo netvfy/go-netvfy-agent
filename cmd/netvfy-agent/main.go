@@ -667,7 +667,8 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 				dlog.Printf("ARP HLEN: %x\n", binary.BigEndian.Uint16(frameBuf[22:24])>>8)
 				dlog.Printf("ARP PLEN: %x\n", binary.BigEndian.Uint16(frameBuf[22:24])&0x0F)
 
-				dlog.Printf("ARP OPER: %x\n", binary.BigEndian.Uint16(frameBuf[24:26]))
+				oper := binary.BigEndian.Uint16(frameBuf[24:26])
+				dlog.Printf("ARP OPER: %x\n", oper)
 				// FIXME handle request if OPER is 1, need to craft a reply !
 
 				sha, _ := net.ParseMAC("00:00:00:00:00:00")
@@ -684,9 +685,43 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 				tpa := net.IPv4(frameBuf[42], frameBuf[43], frameBuf[44], frameBuf[45]).To4()
 				dlog.Printf("ARP TPA: %s\n", tpa.String())
 
-				err := arpTable.Update(spa.String(), sha)
-				if err != nil {
-					elog.Printf("unable to update ARP entry: %v", err)
+				if oper == 2 {
+					// We received an ARP response
+					err := arpTable.Update(spa.String(), sha)
+					if err != nil {
+						elog.Printf("unable to update ARP entry: %v", err)
+					}
+				} else if oper == 1 {
+					// We received an ARP request, send a response
+
+					// DST MAC address
+					copy(frameBuf[4:10], sha)
+					// src MAC address
+					copy(frameBuf[10:16], gMAC[0:6])
+					// EtherType ARP
+					binary.BigEndian.PutUint16(frameBuf[16:18], 0x0806)
+
+					// ARP operation, response is 2
+					binary.BigEndian.PutUint16(frameBuf[24:26], 2)
+
+					// ARP Sender hardware address (SHA)
+					copy(frameBuf[26:32], gMAC[0:6])
+
+					// ARP Sender protocol address (SPA)
+					copy(frameBuf[32:36], tpa)
+
+					// ARP Target hardware address (THA)
+					// ignored in a request operation
+					copy(frameBuf[36:42], sha)
+
+					// ARP Target protocol address (TPA)
+					copy(frameBuf[42:46], spa)
+
+					b, err := vswitchConn.Write(frameBuf[0 : 4+14+n])
+					if err != nil {
+						elog.Printf("failed to write frame to %s\n", utunName)
+					}
+					dlog.Printf("wrote %d bytes to vswitch\n", b)
 				}
 			} else {
 				// IP  -> 0x0800
