@@ -660,19 +660,43 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 
 			etherType := binary.BigEndian.Uint16(frameBuf[16:18])
 			dlog.Printf("Ethertype %04x\n", etherType)
+			if etherType == 0x0806 {
+				dlog.Printf("ARP HTYPE: %x\n", binary.BigEndian.Uint16(frameBuf[18:20]))
+				dlog.Printf("ARP PTYPE: %x\n", binary.BigEndian.Uint16(frameBuf[20:22]))
 
-			// ARP -> 0x0806
-			// TODO(sneha): If this is ARP, tweak ARPTable entry, read from wait Queue and send off.
+				dlog.Printf("ARP HLEN: %x\n", binary.BigEndian.Uint16(frameBuf[22:24])>>8)
+				dlog.Printf("ARP PLEN: %x\n", binary.BigEndian.Uint16(frameBuf[22:24])&0x0F)
 
-			// IP  -> 0x0800
+				dlog.Printf("ARP OPER: %x\n", binary.BigEndian.Uint16(frameBuf[24:26]))
+				// FIXME handle request if OPER is 1, need to craft a reply !
 
-			// FIXME: handle fragmented frames
-			b, err := utun.Write(frameBuf[4+14 : offset])
-			if err != nil {
-				elog.Printf("failed to write to the utun device: %v\n", err)
+				sha, _ := net.ParseMAC("00:00:00:00:00:00")
+				copy(sha, frameBuf[26:32])
+				dlog.Printf("ARP SHA: %s\n", sha.String())
+
+				spa := net.IPv4(frameBuf[32], frameBuf[33], frameBuf[34], frameBuf[35])
+				dlog.Printf("ARP SPA: %s\n", spa.String())
+
+				tha, _ := net.ParseMAC("00:00:00:00:00:00")
+				copy(tha, frameBuf[36:42])
+				dlog.Printf("ARP THA: %s\n", tha)
+
+				tpa := net.IPv4(frameBuf[42], frameBuf[43], frameBuf[44], frameBuf[45]).To4()
+				dlog.Printf("ARP TPA: %s\n", tpa.String())
+
+				err := arpTable.Update(spa.String(), sha)
+				if err != nil {
+					elog.Printf("unable to update ARP entry: %v", err)
+				}
+			} else {
+				// IP  -> 0x0800
+				// FIXME: handle fragmented frames
+				b, err := utun.Write(frameBuf[4+14 : offset])
+				if err != nil {
+					elog.Printf("failed to write to the utun device: %v\n", err)
+				}
+				dlog.Printf("wrote %d bytes to the utun device\n", b)
 			}
-			dlog.Printf("wrote %d bytes to the utun device\n", b)
-
 		default:
 			return
 		}
@@ -939,7 +963,7 @@ func main() {
 		go func() {
 			frameBuf := make([]byte, 2000)
 			for {
-				n, err := utun.Read(frameBuf[18:])
+				n, err := utun.Read(frameBuf[4+14:])
 				if err != nil {
 					elog.Printf("failed to read from %s: %v\n", utunName, err)
 				}
@@ -950,13 +974,13 @@ func main() {
 				}
 
 				// nvHeader lenght value
-				binary.BigEndian.PutUint16(frameBuf[0:2], uint16(n+14+2))
+				binary.BigEndian.PutUint16(frameBuf[0:2], uint16(4+14+n))
 				// nvHeader type frame
 				binary.BigEndian.PutUint16(frameBuf[2:4], 1)
 				// src MAC address
 				copy(frameBuf[10:16], gMAC[0:6])
 
-				dstIP := net.IP([]byte(frameBuf[30:34]))
+				dstIP := net.IPv4(frameBuf[34], frameBuf[35], frameBuf[36], frameBuf[37]).To4()
 				entry, found, err := arpTable.Get(dstIP.String())
 				if err != nil {
 					elog.Printf("unable to retrieve ARP entry for %v: %v", dstIP.String(), err)
@@ -978,7 +1002,7 @@ func main() {
 						elog.Printf("unable to add waiting ARP entry: %v", err)
 					}
 
-					arpQueue.Add(dstIP.String(), frameBuf[0:4+14+n])
+					//arpQueue.Add(dstIP.String(), frameBuf[0:4+14+n])
 
 					// DST MAC address
 					broadcast := [6]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
@@ -1025,7 +1049,7 @@ func main() {
 				if err != nil {
 					elog.Printf("failed to write frame to %s\n", utunName)
 				}
-				dlog.Printf("wrote %d bytes to %s\n", b, utunName)
+				dlog.Printf("wrote %d bytes to vswitch\n", b)
 			}
 		}()
 
