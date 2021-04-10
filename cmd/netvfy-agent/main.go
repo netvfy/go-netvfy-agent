@@ -103,7 +103,6 @@ type keepAlive struct {
 type nvHdr struct {
 	Length uint16
 	Type   uint16
-	Tmp    uint16
 }
 
 type switchInstance struct {
@@ -560,7 +559,7 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 
 	// Prepare the keep alive ticker
 	nvhdr = &nvHdr{
-		Length: 4,
+		Length: 2,
 		Type:   0,
 	}
 
@@ -686,12 +685,14 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 				dlog.Printf("ARP TPA: %s\n", tpa.String())
 
 				if oper == 2 {
+					dlog.Printf("Received ARP response\n")
 					// We received an ARP response
 					err := arpTable.Update(spa.String(), sha)
 					if err != nil {
 						elog.Printf("unable to update ARP entry: %v", err)
 					}
 				} else if oper == 1 {
+					dlog.Printf("Received ARP request\n")
 					// We received an ARP request, send a response
 
 					// DST MAC address
@@ -717,7 +718,7 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 					// ARP Target protocol address (TPA)
 					copy(frameBuf[42:46], spa)
 
-					b, err := vswitchConn.Write(frameBuf[0 : 4+14+n])
+					b, err := vswitchConn.Write(frameBuf[0:n])
 					if err != nil {
 						elog.Printf("failed to write frame to %s\n", utunName)
 					}
@@ -1009,7 +1010,7 @@ func main() {
 				}
 
 				// nvHeader lenght value
-				binary.BigEndian.PutUint16(frameBuf[0:2], uint16(4+14+n))
+				binary.BigEndian.PutUint16(frameBuf[0:2], uint16(2+14+n))
 				// nvHeader type frame
 				binary.BigEndian.PutUint16(frameBuf[2:4], 1)
 				// src MAC address
@@ -1030,7 +1031,27 @@ func main() {
 					// EtherType IP
 					binary.BigEndian.PutUint16(frameBuf[16:18], 0x0800)
 
+					b, err := vswitchConn.Write(frameBuf[0 : 4+14+n])
+					if err != nil {
+						elog.Printf("failed to write frame to %s\n", utunName)
+					}
+					dlog.Printf("wrote %d bytes to vswitch\n", b)
+
 				} else {
+
+					// ARP packet size for ethernet + IPv4
+					n = 28
+
+					// nvHeader lenght value
+					binary.BigEndian.PutUint16(frameBuf[0:2], uint16(2+14+n))
+
+					// nvHeader type frame
+					binary.BigEndian.PutUint16(frameBuf[2:4], 1)
+					// src MAC address
+					copy(frameBuf[10:16], gMAC[0:6])
+
+					dlog.Printf("Sending an ARP request !\n")
+
 					// The destination MAC is unknown, store packet and send an ARP request.
 					err := arpTable.Add(dstIP.String())
 					if err != nil {
@@ -1076,15 +1097,13 @@ func main() {
 					tpa := net.ParseIP(dstIP.String()).To4()
 					copy(frameBuf[42:46], tpa)
 
-					// ARP packet size for ethernet + IPv4
-					n = 28
-				}
+					b, err := vswitchConn.Write(frameBuf[0 : 4+14+n])
+					if err != nil {
+						elog.Printf("failed to write frame to %s\n", utunName)
+					}
+					dlog.Printf("wrote %d bytes to vswitch\n", b)
 
-				b, err := vswitchConn.Write(frameBuf[0 : 4+14+n])
-				if err != nil {
-					elog.Printf("failed to write frame to %s\n", utunName)
 				}
-				dlog.Printf("wrote %d bytes to vswitch\n", b)
 			}
 		}()
 
