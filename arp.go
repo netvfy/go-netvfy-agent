@@ -11,14 +11,21 @@ import (
 	"time"
 )
 
+// Common constants used to craft ARP requests and replies.
 const (
-	// EtherTypeARP header value
-	EtherTypeARP uint16 = 0x0806
-	// EtherTypeIPv4 header value
-	EtherTypeIPv4 uint16 = 0x0800
-	// OperationRequest indicates frame of type ARP request
+	// TypeARP header value used for EtherType.
+	TypeARP uint16 = 0x0806
+	// TypeIPv4 header value used for either EtherType or ProtocolType.
+	TypeIPv4 uint16 = 0x0800
+	// HTypeEthernet is the hardware ethernet header value
+	HTypeEthernet uint16 = 1
+	// HLenEthernet is the hardware length for type ethernet - 6.
+	HLenEthernet = 6
+	// PLenIPv4 is the protocol length for type IPv4 - 4.
+	PLenIPv4 = 4
+	// OperationRequest indicates OPER type ARP request
 	OperationRequest uint16 = 1
-	// OperationReply indicates frame of type ARP reply
+	// OperationReply indicates OPER type ARP reply
 	OperationReply uint16 = 2
 )
 

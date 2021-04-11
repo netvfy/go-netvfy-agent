@@ -659,7 +659,7 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 
 			etherType := binary.BigEndian.Uint16(frameBuf[16:18])
 			dlog.Printf("Ethertype %04x\n", etherType)
-			if etherType == agent.EtherTypeARP {
+			if etherType == agent.TypeARP {
 				dlog.Printf("ARP HTYPE: %x\n", binary.BigEndian.Uint16(frameBuf[18:20]))
 				dlog.Printf("ARP PTYPE: %x\n", binary.BigEndian.Uint16(frameBuf[20:22]))
 
@@ -699,10 +699,10 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 					// src MAC address
 					copy(frameBuf[10:16], gMAC[0:6])
 					// EtherType ARP
-					binary.BigEndian.PutUint16(frameBuf[16:18], 0x0806)
+					binary.BigEndian.PutUint16(frameBuf[16:18], agent.TypeARP)
 
 					// ARP operation, response is 2
-					binary.BigEndian.PutUint16(frameBuf[24:26], 2)
+					binary.BigEndian.PutUint16(frameBuf[24:26], agent.OperationReply)
 
 					// ARP Sender hardware address (SHA)
 					copy(frameBuf[26:32], gMAC[0:6])
@@ -1028,7 +1028,7 @@ func main() {
 					// DST MAC address
 					copy(frameBuf[4:10], entry.Mac)
 					// EtherType IP
-					binary.BigEndian.PutUint16(frameBuf[16:18], 0x0800)
+					binary.BigEndian.PutUint16(frameBuf[16:18], agent.TypeIPv4)
 
 					b, err := vswitchConn.Write(frameBuf[0 : 4+14+n])
 					if err != nil {
@@ -1041,7 +1041,7 @@ func main() {
 					// ARP packet size for ethernet + IPv4
 					n = 28
 
-					// nvHeader lenght value
+					// nvHeader length value
 					binary.BigEndian.PutUint16(frameBuf[0:2], uint16(2+14+n))
 
 					// nvHeader type frame
@@ -1063,21 +1063,21 @@ func main() {
 					broadcast := [6]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
 					copy(frameBuf[4:10], broadcast[0:6])
 					// EtherType ARP
-					binary.BigEndian.PutUint16(frameBuf[16:18], 0x0806)
+					binary.BigEndian.PutUint16(frameBuf[16:18], agent.TypeARP)
 
 					// ARP Hardware type (HTYPE), Ethernet is 1
-					binary.BigEndian.PutUint16(frameBuf[18:20], 1)
+					binary.BigEndian.PutUint16(frameBuf[18:20], agent.HTypeEthernet)
 
 					// ARP Protocol type (PTYPE), IPv4 is 0x0800
-					binary.BigEndian.PutUint16(frameBuf[20:22], 0x0800)
+					binary.BigEndian.PutUint16(frameBuf[20:22], agent.TypeIPv4)
 
-					var HlenPlen uint16 = (6 << 8) | 4
+					var HlenPlen uint16 = (agent.HLenEthernet << 8) | agent.PLenIPv4
 					// Hardware len is 6 for ethernet
 					// Protocol len is 4 for IPv4
 					binary.BigEndian.PutUint16(frameBuf[22:24], HlenPlen)
 
 					// ARP operation, request is 1
-					binary.BigEndian.PutUint16(frameBuf[24:26], 1)
+					binary.BigEndian.PutUint16(frameBuf[24:26], agent.OperationRequest)
 
 					// ARP Sender hardware address (SHA)
 					copy(frameBuf[26:32], gMAC[0:6])
