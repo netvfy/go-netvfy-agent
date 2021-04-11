@@ -659,7 +659,7 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 
 			etherType := binary.BigEndian.Uint16(frameBuf[16:18])
 			dlog.Printf("Ethertype %04x\n", etherType)
-			if etherType == 0x0806 {
+			if etherType == agent.EtherTypeARP {
 				dlog.Printf("ARP HTYPE: %x\n", binary.BigEndian.Uint16(frameBuf[18:20]))
 				dlog.Printf("ARP PTYPE: %x\n", binary.BigEndian.Uint16(frameBuf[20:22]))
 
@@ -683,14 +683,14 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 				tpa := net.IPv4(frameBuf[42], frameBuf[43], frameBuf[44], frameBuf[45]).To4()
 				dlog.Printf("ARP TPA: %s\n", tpa.String())
 
-				if oper == 2 {
+				if oper == agent.OperationReply {
 					dlog.Printf("Received ARP response\n")
 					// We received an ARP response
 					err := arpTable.Update(spa.String(), sha)
 					if err != nil {
 						elog.Printf("unable to update ARP entry: %v", err)
 					}
-				} else if oper == 1 {
+				} else if oper == agent.OperationRequest {
 					dlog.Printf("Received ARP request\n")
 					// We received an ARP request, send a response
 

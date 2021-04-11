@@ -11,6 +11,17 @@ import (
 	"time"
 )
 
+const (
+	// EtherTypeARP header value
+	EtherTypeARP uint16 = 0x0806
+	// EtherTypeIPv4 header value
+	EtherTypeIPv4 uint16 = 0x0800
+	// OperationRequest indicates frame of type ARP request
+	OperationRequest uint16 = 1
+	// OperationReply indicates frame of type ARP reply
+	OperationReply uint16 = 2
+)
+
 // ArpTable is thread-safe ARP hashmap matching string IPv4 address to ArpEntries.
 type ArpTable struct {
 	ArpMap sync.Map
