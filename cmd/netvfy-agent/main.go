@@ -1037,66 +1037,13 @@ func main() {
 					dlog.Printf("wrote %d bytes to vswitch\n", b)
 
 				} else {
-
-					// ARP packet size for ethernet + IPv4
-					n = 28
-
-					// nvHeader length value
-					binary.BigEndian.PutUint16(frameBuf[0:2], uint16(2+14+n))
-
-					// nvHeader type frame
-					binary.BigEndian.PutUint16(frameBuf[2:4], 1)
-					// src MAC address
-					copy(frameBuf[10:16], gMAC[0:6])
-
 					dlog.Printf("Sending an ARP request !\n")
-
-					// The destination MAC is unknown, store packet and send an ARP request.
-					err := arpTable.Add(dstIP.String())
+					sendBuf, err := agent.CreateARPRequest(gMAC, dstIP.String(), gSwitch.info.IPaddr, arpTable)
 					if err != nil {
 						elog.Printf("unable to add waiting ARP entry: %v", err)
 					}
 
-					//arpQueue.Add(dstIP.String(), frameBuf[0:4+14+n])
-
-					// DST MAC address
-					broadcast := [6]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
-					copy(frameBuf[4:10], broadcast[0:6])
-					// EtherType ARP
-					binary.BigEndian.PutUint16(frameBuf[16:18], agent.TypeARP)
-
-					// ARP Hardware type (HTYPE), Ethernet is 1
-					binary.BigEndian.PutUint16(frameBuf[18:20], agent.HTypeEthernet)
-
-					// ARP Protocol type (PTYPE), IPv4 is 0x0800
-					binary.BigEndian.PutUint16(frameBuf[20:22], agent.TypeIPv4)
-
-					var HlenPlen uint16 = (agent.HLenEthernet << 8) | agent.PLenIPv4
-					// Hardware len is 6 for ethernet
-					// Protocol len is 4 for IPv4
-					binary.BigEndian.PutUint16(frameBuf[22:24], HlenPlen)
-
-					// ARP operation, request is 1
-					binary.BigEndian.PutUint16(frameBuf[24:26], agent.OperationRequest)
-
-					// ARP Sender hardware address (SHA)
-					copy(frameBuf[26:32], gMAC[0:6])
-
-					// ARP Sender protocol address (SPA)
-					spa := net.ParseIP(gSwitch.info.IPaddr).To4()
-					copy(frameBuf[32:36], spa)
-
-					// ARP Target hardware address (THA)
-					// ignored in a request operation
-					binary.BigEndian.PutUint16(frameBuf[36:38], 0x0)
-					binary.BigEndian.PutUint16(frameBuf[38:40], 0x0)
-					binary.BigEndian.PutUint16(frameBuf[40:42], 0x0)
-
-					// ARP Target protocol address (TPA)
-					tpa := net.ParseIP(dstIP.String()).To4()
-					copy(frameBuf[42:46], tpa)
-
-					b, err := vswitchConn.Write(frameBuf[0 : 4+14+n])
+					b, err := vswitchConn.Write(sendBuf)
 					if err != nil {
 						elog.Printf("failed to write frame to %s\n", utunName)
 					}

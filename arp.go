@@ -106,6 +106,7 @@ func (t *ArpTable) Remove(IP string) error {
 }
 
 // ARPQueue is a thread-safe doubly-linked list buffer of ArpQueueEntries awaiting ARP replies.
+// It is used to store queued-up packets awaiting an ARP response.
 type ARPQueue struct {
 	// embedded mutex
 	sync.Mutex
@@ -117,7 +118,7 @@ type ARPQueue struct {
 	ll log.Logger
 }
 
-// ArpQueueEntry has string representation of IP along with buffers
+// ArpQueueEntry has string representation of IP along with buffers.
 type ArpQueueEntry struct {
 	IP   string
 	buff []byte
@@ -207,4 +208,72 @@ func (q *ARPQueue) IterateAndRun(ip string, fn func([]byte) error) {
 		q.List.Remove(e)
 		e = eTemp
 	}
+}
+
+// CreateARPRequest crafts ARP Request from switch and dst IP and MAC address.
+func CreateARPRequest(gMAC []byte, dstIP string, switchIP string, arpTable *ArpTable) ([]byte, error) {
+	frameBuf := make([]byte, 2000)
+
+	// Destination MAC is not found, so re-craft
+	// ARP packet size for ethernet + IPv4
+	n := 28
+
+	// nvHeader length value
+	binary.BigEndian.PutUint16(frameBuf[0:2], uint16(2+14+n))
+
+	// nvHeader type frame
+	binary.BigEndian.PutUint16(frameBuf[2:4], 1)
+	// src MAC address
+	copy(frameBuf[10:16], gMAC[0:6])
+
+	// The destination MAC is unknown, store packet and send an ARP request.
+	err := arpTable.Add(dstIP)
+	if err != nil {
+		return nil, fmt.Errorf("unable to add waiting ARP entry: %v", err)
+	}
+
+	// TODO(sneha): use queueing later.
+	//arpQueue.Add(dstIP.String(), frameBuf[0:4+14+n])
+
+	// DST MAC address
+	broadcast := [6]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
+	copy(frameBuf[4:10], broadcast[0:6])
+	// EtherType ARP
+	binary.BigEndian.PutUint16(frameBuf[16:18], TypeARP)
+
+	// ARP Hardware type (HTYPE), Ethernet is 1
+	binary.BigEndian.PutUint16(frameBuf[18:20], HTypeEthernet)
+
+	// ARP Protocol type (PTYPE), IPv4 is 0x0800
+	binary.BigEndian.PutUint16(frameBuf[20:22], TypeIPv4)
+
+	var HlenPlen uint16 = (HLenEthernet << 8) | PLenIPv4
+	// Hardware len is 6 for ethernet
+	// Protocol len is 4 for IPv4
+	binary.BigEndian.PutUint16(frameBuf[22:24], HlenPlen)
+
+	// ARP operation, request is 1
+	binary.BigEndian.PutUint16(frameBuf[24:26], OperationRequest)
+
+	// ARP Sender hardware address (SHA)
+	copy(frameBuf[26:32], gMAC[0:6])
+
+	// ARP Sender protocol address (SPA)
+	spa := net.ParseIP(switchIP).To4()
+	copy(frameBuf[32:36], spa)
+
+	// ARP Target hardware address (THA)
+	// ignored in a request operation
+	binary.BigEndian.PutUint16(frameBuf[36:38], 0x0)
+	binary.BigEndian.PutUint16(frameBuf[38:40], 0x0)
+	binary.BigEndian.PutUint16(frameBuf[40:42], 0x0)
+
+	// ARP Target protocol address (TPA)
+	tpa := net.ParseIP(dstIP).To4()
+	copy(frameBuf[42:46], tpa)
+	return frameBuf[0 : 4+14+n], nil
+}
+
+func CreateARPReply() []byte {
+
 }
