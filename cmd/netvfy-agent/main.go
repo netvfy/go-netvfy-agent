@@ -668,7 +668,6 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 
 				oper := binary.BigEndian.Uint16(frameBuf[24:26])
 				dlog.Printf("ARP OPER: %x\n", oper)
-				// FIXME handle request if OPER is 1, need to craft a reply !
 
 				sha, _ := net.ParseMAC("00:00:00:00:00:00")
 				copy(sha, frameBuf[26:32])
