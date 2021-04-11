@@ -157,7 +157,7 @@ func compareArpEntry(e1 *ArpEntry, e2 *ArpEntry) bool {
 
 // TestArpQueue tests the basic Add, Len, SendAndRemove functionality of ArpQueue.
 func TestArpQueue_Add(t *testing.T) {
-	length := 2
+	length := uint(2)
 
 	testBytes1, err := generateTestFrame(srcIP, testIP1)
 	if err != nil {
@@ -172,10 +172,7 @@ func TestArpQueue_Add(t *testing.T) {
 		t.Fatalf("unable to generate testIP frame: %v", err)
 	}
 
-	queue, err := NewARPQueue(length)
-	if err != nil {
-		t.Fatalf("unable to create NewARPQueue: %v", err)
-	}
+	queue := NewARPQueue(length)
 
 	queue.Add(testIP1, testBytes1)
 	if queue.Len() != 1 {
@@ -218,10 +215,7 @@ func TestArpQueue_Iterate(t *testing.T) {
 	}
 
 	// create ArpQueue and add
-	queue, err := NewARPQueue(2)
-	if err != nil {
-		t.Fatalf("unable to create queue: %v", err)
-	}
+	queue := NewARPQueue(2)
 
 	queue.Add(testIP1, buff)
 	queue.Add(testIP1, buff)

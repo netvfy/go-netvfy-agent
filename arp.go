@@ -11,6 +11,17 @@ import (
 	"time"
 )
 
+const (
+	// EtherTypeARP header value
+	EtherTypeARP uint16 = 0x0806
+	// EtherTypeIPv4 header value
+	EtherTypeIPv4 uint16 = 0x0800
+	// OperationRequest indicates frame of type ARP request
+	OperationRequest uint16 = 1
+	// OperationReply indicates frame of type ARP reply
+	OperationReply uint16 = 2
+)
+
 // ArpTable is thread-safe ARP hashmap matching string IPv4 address to ArpEntries.
 type ArpTable struct {
 	ArpMap sync.Map
@@ -42,8 +53,12 @@ func (t *ArpTable) Add(IP string) error {
 		return errors.New("valid IP address must be provided")
 	}
 
-	ip := net.ParseIP(IP)
-	t.ArpMap.Store(IP, &ArpEntry{IP: ip, Mac: nil, Status: StatusWaiting, Timestamp: time.Now()})
+	// Check if an entry already exist before adding one.
+	_, ok := t.ArpMap.Load(IP)
+	if ok == false {
+		ip := net.ParseIP(IP)
+		t.ArpMap.Store(IP, &ArpEntry{IP: ip, Mac: nil, Status: StatusWaiting, Timestamp: time.Now()})
+	}
 	return nil
 }
 
@@ -90,7 +105,7 @@ type ARPQueue struct {
 	// embedded doubly-linked container list
 	list.List
 	// max length of buffer
-	length int
+	length uint
 	// logger
 	ll log.Logger
 }
@@ -102,13 +117,10 @@ type ArpQueueEntry struct {
 }
 
 // NewARPQueue creates and returns a new doubly-linked list of type ARPQueue.
-func NewARPQueue(length int) (*ARPQueue, error) {
-	if length <= 0 {
-		return nil, errors.New("maximum queue length must be greater than 0")
-	}
+func NewARPQueue(length uint) *ARPQueue {
 	return &ARPQueue{
 		length: length,
-	}, nil
+	}
 }
 
 // Add creates an entry and removes the oldest entry in the ARPQueue if queue length overflowed.
@@ -126,8 +138,8 @@ func (q *ARPQueue) Add(IP string, buff []byte) {
 }
 
 // Len return the current length of the container list.
-func (q *ARPQueue) Len() int {
-	return q.List.Len()
+func (q *ARPQueue) Len() uint {
+	return uint(q.List.Len())
 }
 
 // Send returns a generic function to send provided frames to an connection.
