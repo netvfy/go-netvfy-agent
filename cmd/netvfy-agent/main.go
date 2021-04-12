@@ -660,27 +660,27 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 			etherType := binary.BigEndian.Uint16(frameBuf[16:18])
 			dlog.Printf("Ethertype %04x\n", etherType)
 			if etherType == agent.TypeARP {
-				dlog.Printf("ARP HTYPE: %x\n", binary.BigEndian.Uint16(frameBuf[18:20]))
-				dlog.Printf("ARP PTYPE: %x\n", binary.BigEndian.Uint16(frameBuf[20:22]))
-
-				dlog.Printf("ARP HLEN: %x\n", binary.BigEndian.Uint16(frameBuf[22:24])>>8)
-				dlog.Printf("ARP PLEN: %x\n", binary.BigEndian.Uint16(frameBuf[22:24])&0x0F)
 
 				oper := binary.BigEndian.Uint16(frameBuf[24:26])
-				dlog.Printf("ARP OPER: %x\n", oper)
 
 				sha, _ := net.ParseMAC("00:00:00:00:00:00")
 				copy(sha, frameBuf[26:32])
-				dlog.Printf("ARP SHA: %s\n", sha.String())
 
 				spa := net.IPv4(frameBuf[32], frameBuf[33], frameBuf[34], frameBuf[35])
-				dlog.Printf("ARP SPA: %s\n", spa.String())
 
 				tha, _ := net.ParseMAC("00:00:00:00:00:00")
 				copy(tha, frameBuf[36:42])
-				dlog.Printf("ARP THA: %s\n", tha)
 
 				tpa := net.IPv4(frameBuf[42], frameBuf[43], frameBuf[44], frameBuf[45]).To4()
+
+				dlog.Printf("ARP HTYPE: %x\n", binary.BigEndian.Uint16(frameBuf[18:20]))
+				dlog.Printf("ARP PTYPE: %x\n", binary.BigEndian.Uint16(frameBuf[20:22]))
+				dlog.Printf("ARP HLEN: %x\n", binary.BigEndian.Uint16(frameBuf[22:24])>>8)
+				dlog.Printf("ARP PLEN: %x\n", binary.BigEndian.Uint16(frameBuf[22:24])&0x0F)
+				dlog.Printf("ARP OPER: %x\n", oper)
+				dlog.Printf("ARP SHA: %s\n", sha.String())
+				dlog.Printf("ARP SPA: %s\n", spa.String())
+				dlog.Printf("ARP THA: %s\n", tha)
 				dlog.Printf("ARP TPA: %s\n", tpa.String())
 
 				if oper == agent.OperationReply {
@@ -693,31 +693,9 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 				} else if oper == agent.OperationRequest {
 					dlog.Printf("Received ARP request\n")
 					// We received an ARP request, send a response
+					sendBuf := agent.CreateARPReply(gMAC[0:6], sha, tpa, spa)
 
-					// DST MAC address
-					copy(frameBuf[4:10], sha)
-					// src MAC address
-					copy(frameBuf[10:16], gMAC[0:6])
-					// EtherType ARP
-					binary.BigEndian.PutUint16(frameBuf[16:18], agent.TypeARP)
-
-					// ARP operation, response is 2
-					binary.BigEndian.PutUint16(frameBuf[24:26], agent.OperationReply)
-
-					// ARP Sender hardware address (SHA)
-					copy(frameBuf[26:32], gMAC[0:6])
-
-					// ARP Sender protocol address (SPA)
-					copy(frameBuf[32:36], tpa)
-
-					// ARP Target hardware address (THA)
-					// ignored in a request operation
-					copy(frameBuf[36:42], sha)
-
-					// ARP Target protocol address (TPA)
-					copy(frameBuf[42:46], spa)
-
-					b, err := vswitchConn.Write(frameBuf[0:n])
+					b, err := vswitchConn.Write(sendBuf[0:n])
 					if err != nil {
 						elog.Printf("failed to write frame to %s\n", utunName)
 					}

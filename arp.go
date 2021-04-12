@@ -274,6 +274,32 @@ func CreateARPRequest(gMAC []byte, dstIP string, switchIP string, arpTable *ArpT
 	return frameBuf[0 : 4+14+n], nil
 }
 
-func CreateARPReply() []byte {
+// CreateARPReply crafts an ARP Reply
+func CreateARPReply(srcAddr net.HardwareAddr, dstAddr net.HardwareAddr, spa net.IP, tpa net.IP) []byte {
+	frameBuf := make([]byte, 2000)
 
+	// DST MAC address
+	copy(frameBuf[4:10], dstAddr)
+	// src MAC address
+	copy(frameBuf[10:16], srcAddr)
+	// EtherType ARP
+	binary.BigEndian.PutUint16(frameBuf[16:18], TypeARP)
+
+	// ARP operation, response is 2
+	binary.BigEndian.PutUint16(frameBuf[24:26], OperationReply)
+
+	// ARP Sender hardware address (SHA)
+	copy(frameBuf[26:32], srcAddr)
+
+	// ARP Sender protocol address (SPA)
+	copy(frameBuf[32:36], spa)
+
+	// ARP Target hardware address (THA)
+	// ignored in a request operation
+	copy(frameBuf[36:42], dstAddr)
+
+	// ARP Target protocol address (TPA)
+	copy(frameBuf[42:46], tpa)
+
+	return frameBuf
 }
