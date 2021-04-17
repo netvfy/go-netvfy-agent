@@ -210,34 +210,32 @@ func (q *ARPQueue) IterateAndRun(ip string, fn func([]byte) error) {
 	}
 }
 
-// CreateARPRequest crafts ARP Request from switch and dst IP and MAC address.
-func CreateARPRequest(gMAC []byte, dstIP string, switchIP string, arpTable *ArpTable) ([]byte, error) {
-	frameBuf := make([]byte, 2000)
+// GenerateARPRequest crafts ARP Request from switch and dst IP and MAC address.
+func GenerateARPRequest(arpTable *ArpTable, srcMAC []byte, dstIP string, srcIP string) ([]byte, error) {
 
-	// Destination MAC is not found, so re-craft
-	// ARP packet size for ethernet + IPv4
-	n := 28
-
-	// nvHeader length value
-	binary.BigEndian.PutUint16(frameBuf[0:2], uint16(2+14+n))
-
-	// nvHeader type frame
-	binary.BigEndian.PutUint16(frameBuf[2:4], 1)
-	// src MAC address
-	copy(frameBuf[10:16], gMAC[0:6])
-
-	// The destination MAC is unknown, store packet and send an ARP request.
+	// FIXME this function should be .Upsert() (Add or Update the entry)
 	err := arpTable.Add(dstIP)
 	if err != nil {
 		return nil, fmt.Errorf("unable to add waiting ARP entry: %v", err)
 	}
 
-	// TODO(sneha): use queueing later.
-	//arpQueue.Add(dstIP.String(), frameBuf[0:4+14+n])
+	// Make space for nv header + ethernet header + ARP request
+	frameBuf := make([]byte, 4+14+28)
 
-	// DST MAC address
+	// nvHeader length value (the 2 bytes length field doesn't count so it's 2, not 4 byteshhh
+	// for the nv header)
+	binary.BigEndian.PutUint16(frameBuf[0:2], uint16(2+14+28))
+
+	// nvHeader type frame
+	binary.BigEndian.PutUint16(frameBuf[2:4], 1)
+
+	// dst MAC address
 	broadcast := [6]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
 	copy(frameBuf[4:10], broadcast[0:6])
+
+	// src MAC address
+	copy(frameBuf[10:16], srcMAC[0:6])
+
 	// EtherType ARP
 	binary.BigEndian.PutUint16(frameBuf[16:18], TypeARP)
 
@@ -247,19 +245,19 @@ func CreateARPRequest(gMAC []byte, dstIP string, switchIP string, arpTable *ArpT
 	// ARP Protocol type (PTYPE), IPv4 is 0x0800
 	binary.BigEndian.PutUint16(frameBuf[20:22], TypeIPv4)
 
-	var HlenPlen uint16 = (HLenEthernet << 8) | PLenIPv4
 	// Hardware len is 6 for ethernet
 	// Protocol len is 4 for IPv4
+	var HlenPlen uint16 = (HLenEthernet << 8) | PLenIPv4
 	binary.BigEndian.PutUint16(frameBuf[22:24], HlenPlen)
 
 	// ARP operation, request is 1
 	binary.BigEndian.PutUint16(frameBuf[24:26], OperationRequest)
 
 	// ARP Sender hardware address (SHA)
-	copy(frameBuf[26:32], gMAC[0:6])
+	copy(frameBuf[26:32], srcMAC[0:6])
 
 	// ARP Sender protocol address (SPA)
-	spa := net.ParseIP(switchIP).To4()
+	spa := net.ParseIP(srcIP).To4()
 	copy(frameBuf[32:36], spa)
 
 	// ARP Target hardware address (THA)
@@ -271,32 +269,55 @@ func CreateARPRequest(gMAC []byte, dstIP string, switchIP string, arpTable *ArpT
 	// ARP Target protocol address (TPA)
 	tpa := net.ParseIP(dstIP).To4()
 	copy(frameBuf[42:46], tpa)
-	return frameBuf[0 : 4+14+n], nil
+
+	return frameBuf, nil
 }
 
-// CreateARPReply crafts an ARP Reply
-func CreateARPReply(srcAddr net.HardwareAddr, dstAddr net.HardwareAddr, spa net.IP, tpa net.IP) []byte {
-	frameBuf := make([]byte, 2000)
+// GenerateARPReply crafts an ARP Reply
+func GenerateARPReply(srcMAC net.HardwareAddr, dstMAC net.HardwareAddr, spa net.IP, tpa net.IP) []byte {
 
-	// DST MAC address
-	copy(frameBuf[4:10], dstAddr)
+	// Make space for nv header + ethernet header + ARP request
+	frameBuf := make([]byte, 4+14+28)
+
+	// nvHeader length value (the 2 bytes length field doesn't count so it's 2, not 4 byteshhh
+	// for the nv header)
+	binary.BigEndian.PutUint16(frameBuf[0:2], uint16(2+14+28))
+
+	// nvHeader type frame
+	binary.BigEndian.PutUint16(frameBuf[2:4], 1)
+
+	// dst MAC address
+	copy(frameBuf[4:10], dstMAC[0:6])
+
 	// src MAC address
-	copy(frameBuf[10:16], srcAddr)
+	copy(frameBuf[10:16], srcMAC[0:6])
+
 	// EtherType ARP
 	binary.BigEndian.PutUint16(frameBuf[16:18], TypeARP)
+
+	// ARP Hardware type (HTYPE), Ethernet is 1
+	binary.BigEndian.PutUint16(frameBuf[18:20], HTypeEthernet)
+
+	// ARP Protocol type (PTYPE), IPv4 is 0x0800
+	binary.BigEndian.PutUint16(frameBuf[20:22], TypeIPv4)
+
+	// Hardware len is 6 for ethernet
+	// Protocol len is 4 for IPv4
+	var HlenPlen uint16 = (HLenEthernet << 8) | PLenIPv4
+	binary.BigEndian.PutUint16(frameBuf[22:24], HlenPlen)
 
 	// ARP operation, response is 2
 	binary.BigEndian.PutUint16(frameBuf[24:26], OperationReply)
 
 	// ARP Sender hardware address (SHA)
-	copy(frameBuf[26:32], srcAddr)
+	copy(frameBuf[26:32], srcMAC)
 
 	// ARP Sender protocol address (SPA)
 	copy(frameBuf[32:36], spa)
 
 	// ARP Target hardware address (THA)
 	// ignored in a request operation
-	copy(frameBuf[36:42], dstAddr)
+	copy(frameBuf[36:42], dstMAC)
 
 	// ARP Target protocol address (TPA)
 	copy(frameBuf[42:46], tpa)

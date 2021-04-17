@@ -693,9 +693,9 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 				} else if oper == agent.OperationRequest {
 					dlog.Printf("Received ARP request\n")
 					// We received an ARP request, send a response
-					sendBuf := agent.CreateARPReply(gMAC[0:6], sha, tpa, spa)
+					sendBuf := agent.GenerateARPReply(gMAC[0:6], sha, tpa, spa)
 
-					b, err := vswitchConn.Write(sendBuf[0:n])
+					b, err := vswitchConn.Write(sendBuf)
 					if err != nil {
 						elog.Printf("failed to write frame to %s\n", utunName)
 					}
@@ -1016,14 +1016,14 @@ func main() {
 
 				} else {
 					dlog.Printf("Sending an ARP request !\n")
-					sendBuf, err := agent.CreateARPRequest(gMAC, dstIP.String(), gSwitch.info.IPaddr, arpTable)
+					sendBuf, err := agent.GenerateARPRequest(arpTable, gMAC, dstIP.String(), gSwitch.info.IPaddr)
 					if err != nil {
-						elog.Printf("unable to add waiting ARP entry: %v", err)
+						elog.Printf("unable to generate ARP request: %v", err)
 					}
 
 					b, err := vswitchConn.Write(sendBuf)
 					if err != nil {
-						elog.Printf("failed to write frame to %s\n", utunName)
+						elog.Printf("failed to write frame to the switch: %v\n", err)
 					}
 					dlog.Printf("wrote %d bytes to vswitch\n", b)
 
