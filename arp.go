@@ -222,7 +222,7 @@ func GenerateARPRequest(arpTable *ArpTable, srcMAC []byte, dstIP string, srcIP s
 	// Make space for nv header + ethernet header + ARP request
 	frameBuf := make([]byte, 4+14+28)
 
-	// nvHeader length value (the 2 bytes length field doesn't count so it's 2, not 4 byteshhh
+	// nvHeader length value (the 2 bytes length field doesn't count so it's 2, not 4 bytes
 	// for the nv header)
 	binary.BigEndian.PutUint16(frameBuf[0:2], uint16(2+14+28))
 
@@ -276,10 +276,10 @@ func GenerateARPRequest(arpTable *ArpTable, srcMAC []byte, dstIP string, srcIP s
 // GenerateARPReply crafts an ARP Reply
 func GenerateARPReply(srcMAC net.HardwareAddr, dstMAC net.HardwareAddr, spa net.IP, tpa net.IP) []byte {
 
-	// Make space for nv header + ethernet header + ARP request
+	// Make space for nv header + ethernet header + ARP reply
 	frameBuf := make([]byte, 4+14+28)
 
-	// nvHeader length value (the 2 bytes length field doesn't count so it's 2, not 4 byteshhh
+	// nvHeader length value (the 2 bytes length field doesn't count so it's 2, not 4 bytes
 	// for the nv header)
 	binary.BigEndian.PutUint16(frameBuf[0:2], uint16(2+14+28))
 
