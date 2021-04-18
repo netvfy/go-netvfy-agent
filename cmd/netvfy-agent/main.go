@@ -1015,6 +1015,9 @@ func main() {
 					dlog.Printf("wrote %d bytes to vswitch\n", b)
 
 				} else {
+
+					// TODO: Queue ethernet frame while ARP is being resolving the dst MAC address
+
 					dlog.Printf("Sending an ARP request !\n")
 					sendBuf, err := agent.GenerateARPRequest(arpTable, gMAC, dstIP.String(), gSwitch.info.IPaddr)
 					if err != nil {
