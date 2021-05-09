@@ -23,6 +23,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -322,6 +323,7 @@ func provisioning(provLink string, netLabel string) {
 		elog.Fatalf("failed to marshal the network configuration: %v\n", err)
 	}
 
+	os.MkdirAll(filepath.Dir(gNetConfPath), os.ModePerm)
 	err = ioutil.WriteFile(gNetConfPath, marshaledJSON, 0644)
 	if err != nil {
 		elog.Fatalf("failed to save the network configuration: %v\n", err)
@@ -525,6 +527,7 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 	var nvhdr *nvHdr
 	var state tls.ConnectionState
 	var offset int = 0
+	var n int = 0
 
 	frameBuf := make([]byte, 2000)
 
@@ -601,14 +604,17 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 			break
 		}
 
-		n, err := vswitchConn.Read(frameBuf[offset:])
-		if err != nil {
-			dlog.Printf("failed to read from vswitch: %v\n", err)
-			return
+		if offset == 0 {
+			// Read the NV header first.
+			n, err := io.ReadFull(vswitchConn, frameBuf[0:4])
+			if err == io.ErrUnexpectedEOF || err == io.ErrShortBuffer {
+				dlog.Printf("failed to read NV header from vswitch: %v\n", err)
+				return
+			}
+			// Move the offset after we've read more bytes into the buffer
+			offset += n
 		}
 
-		// Move the offset after we've read more bytes into the buffer
-		offset += n
 		// Verify we've read enough bytes to make sense of our custom header
 		if offset < 4 {
 			continue
@@ -623,6 +629,16 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 		// Check if the length is not bigger than our buffer
 		if length > uint16(cap(frameBuf)) {
 			return
+		}
+
+		if offset >= 4 && length > 2 { // try to read the whole frame
+			n, err = io.ReadFull(vswitchConn, frameBuf[offset:offset+int(length)-2-offset+4])
+			if err == io.ErrUnexpectedEOF || err == io.ErrShortBuffer {
+				dlog.Printf("failed to read payload from vswitch: %v\n", err)
+				return
+			}
+			// Move the offset after we've read more bytes into the buffer
+			offset += n
 		}
 
 		// If we don't have the complete payload yet, we skip the next part
@@ -703,7 +719,6 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 				}
 			} else {
 				// IP  -> 0x0800
-				// FIXME: handle fragmented frames
 				b, err := utun.Write(frameBuf[4+14 : offset])
 				if err != nil {
 					elog.Printf("failed to write to the utun device: %v\n", err)
@@ -715,6 +730,7 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 		}
 
 		offset = 0
+		n = 0
 	}
 }
 
