@@ -719,7 +719,6 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 				}
 			} else {
 				// IP  -> 0x0800
-				// FIXME: handle fragmented frames
 				b, err := utun.Write(frameBuf[4+14 : offset])
 				if err != nil {
 					elog.Printf("failed to write to the utun device: %v\n", err)
