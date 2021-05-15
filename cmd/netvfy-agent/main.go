@@ -1,19 +1,14 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
-	"crypto/x509/pkix"
 	"encoding/binary"
 	"encoding/json"
 	"encoding/pem"
-	"errors"
 	"flag"
 	"io"
 	"io/ioutil"
@@ -23,7 +18,6 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -31,32 +25,6 @@ import (
 
 	water "github.com/netvfy/tuntap"
 )
-
-type networkCredentials struct {
-	Name   string `json:"name"`
-	APIsrv string `json:"api_srv"`
-	PVkey  string `json:"pvkey"`
-	Cert   string `json:"cert"`
-	CAcert string `json:"cacert"`
-}
-
-type netvfyConfig struct {
-	Version  int                  `json:"version"`
-	Networks []networkCredentials `json:"networks"`
-}
-
-type provInformation struct {
-	Version    string
-	APIsrv     string
-	NetworkUID string
-	NodeUID    string
-	Key        string
-}
-
-type csrRequest struct {
-	CSR      string `json:"csr"`
-	ProvLink string `json:"provlink"`
-}
 
 type certNetInformation struct {
 	Version    string
@@ -112,10 +80,6 @@ type switchInstance struct {
 	cancel context.CancelFunc
 }
 
-var dlog *log.Logger
-var ilog *log.Logger
-var elog *log.Logger
-
 var gSwitch switchInstance
 var gNetConfPath string
 var utun *water.Interface
@@ -156,178 +120,13 @@ func genMAC() []byte {
 func getOutboundIP() string {
 	conn, err := net.Dial("udp", randomInternetIP)
 	if err != nil {
-		elog.Fatalf("failed get the outbound IP: %v\n", err)
+		agent.Lerror.Fatalf("failed get the outbound IP: %v\n", err)
 	}
 	defer conn.Close()
 
 	localAddr := conn.LocalAddr().(*net.UDPAddr)
 
 	return localAddr.IP.String()
-}
-
-func provisioning(provLink string, netLabel string) {
-
-	var netConf netvfyConfig
-	var networkCred networkCredentials
-	var provInfo provInformation
-	var marshaledJSON []byte
-
-	// Parse the provisioning link
-	u, err := url.Parse(provLink)
-	if err != nil {
-		elog.Fatalf("failed to parse the provisioning link: %v\n", err)
-	}
-
-	dlog.Printf("Parsed provisioning link: %v\n", u.RawQuery)
-
-	values, err := url.ParseQuery(u.RawQuery)
-	if err != nil {
-		elog.Fatalf("failed to parse the query string: %v\n", err)
-	}
-
-	// Extract the fields from the provisioning link
-	provInfo.Version = values.Get("v")
-	provInfo.APIsrv = values.Get("a")
-	provInfo.NetworkUID = values.Get("w")
-	provInfo.NodeUID = values.Get("n")
-	provInfo.Key = values.Get("k")
-
-	if provInfo.Version == "" {
-		elog.Fatal("failed to find the version from the provisioning link")
-	}
-	if provInfo.APIsrv == "" {
-		elog.Fatal("failed to find the API server from the provisioning link")
-	}
-	if provInfo.NetworkUID == "" {
-		elog.Fatal("failed to find the network UID from the provisioning link")
-	}
-	if provInfo.NodeUID == "" {
-		elog.Fatal("failed to find the node UID from the provisioning link")
-	}
-	if provInfo.Key == "" {
-		elog.Fatal("failed to find the key from the provisioning link")
-	}
-
-	// Read the configuration into netConf
-	data, err := ioutil.ReadFile(gNetConfPath)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			// Since the file doesn't exist, we
-			// initialize the netConf structure that will
-			// be written to a new file
-			netConf.Version = 1
-		} else {
-			elog.Fatalf("failed to read the configuration file: %v\n", err)
-		}
-	} else {
-		err = json.Unmarshal(data, &netConf)
-		if err != nil {
-			elog.Fatalf("failed to unmarshal the network configuration: %v\n", err)
-		}
-	}
-
-	// Generate a new public/private key pair
-	privKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		elog.Fatalf("failed to generate new key pair: %v\n", err)
-	}
-
-	// Prepare a Certificate Signing Request
-	name := pkix.Name{
-		CommonName: "netvfy-agent",
-	}
-
-	csrTemplate := x509.CertificateRequest{
-		Subject:            name,
-		SignatureAlgorithm: x509.ECDSAWithSHA512,
-	}
-
-	csrCertificate, err := x509.CreateCertificateRequest(rand.Reader, &csrTemplate, privKey)
-	if err != nil {
-		elog.Fatalf("failed to generate the Certificate Signing Request: %v\n", err)
-	}
-
-	csr := pem.EncodeToMemory(&pem.Block{
-		Type: "CERTIFICATE REQUEST", Bytes: csrCertificate,
-	})
-
-	dlog.Printf("CSR: %s\n", csr)
-
-	// Prepare the HTTP request asking to sign our CSR
-	req := csrRequest{
-		CSR:      string(csr),
-		ProvLink: provLink,
-	}
-
-	jreq, err := json.Marshal(req)
-	if err != nil {
-		elog.Fatalf("failed to marshal the Certificate Signing Request request: %v\n", err)
-	}
-
-	dlog.Printf("CSR request: %s\n", jreq)
-
-	timeout := time.Duration(5 * time.Second)
-	client := http.Client{
-		Timeout: timeout,
-	}
-	request, err := http.NewRequest("POST", "https://"+provInfo.APIsrv+"/v1/provisioning", bytes.NewBuffer(jreq))
-	if err != nil {
-		elog.Fatalf("failed to create the http new request: %v\n", err)
-	}
-	request.Header.Set("Content-Type", "application/json")
-
-	resp, err := client.Do(request)
-	if err != nil {
-		elog.Fatalf("failed to perform the http request: %v\n", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		elog.Fatalf("failed to read the query response: %v\n", err)
-	}
-
-	// Unmarshal the CSR response
-	err = json.Unmarshal(body, &networkCred)
-	if err != nil {
-		elog.Fatalf("failed to unmarshal the provisioning response: %v\n", err)
-	}
-
-	// If no network name was provided, ask for one
-	networkCred.Name = netLabel
-	if networkCred.Name == "" {
-		ilog.Print("Enter the name of the new network: ")
-		reader := bufio.NewReader(os.Stdin)
-		// ReadString will block until the delimiter is entered
-		networkCred.Name, err = reader.ReadString('\n')
-		if err != nil {
-			elog.Fatalf("failed to read the entered network name: %v\n", err)
-		}
-		networkCred.Name = strings.TrimRight(networkCred.Name, "\r\n")
-	}
-
-	networkCred.APIsrv = provInfo.APIsrv
-
-	// Convert private key in string format to be saved in the configuration file
-	x509Encoded, _ := x509.MarshalECPrivateKey(privKey)
-	pemEncoded := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: x509Encoded})
-	networkCred.PVkey = string(pemEncoded)
-
-	dlog.Printf("cert:\n%s\n", networkCred.Cert)
-	dlog.Printf("CAcert:\n%s\n", networkCred.CAcert)
-
-	netConf.Networks = append(netConf.Networks, networkCred)
-
-	marshaledJSON, err = json.MarshalIndent(netConf, "", " ")
-	if err != nil {
-		elog.Fatalf("failed to marshal the network configuration: %v\n", err)
-	}
-
-	os.MkdirAll(filepath.Dir(gNetConfPath), os.ModePerm)
-	err = ioutil.WriteFile(gNetConfPath, marshaledJSON, 0644)
-	if err != nil {
-		elog.Fatalf("failed to save the network configuration: %v\n", err)
-	}
 }
 
 func connController(ctx context.Context, cancel context.CancelFunc, ctrlInfo *controllerInfo, config *tls.Config) {
@@ -337,23 +136,23 @@ func connController(ctx context.Context, cancel context.CancelFunc, ctrlInfo *co
 	// Establish the TLS connection to the controller
 	conn, err := tls.Dial("tcp", ctrlInfo.Addr+":"+ctrlInfo.Port, config)
 	if err != nil {
-		elog.Printf("failed to dial the controller %s:%s: %v", ctrlInfo.Addr, ctrlInfo.Port, err)
+		agent.Lerror.Printf("failed to dial the controller %s:%s: %v", ctrlInfo.Addr, ctrlInfo.Port, err)
 		return
 	}
 	defer conn.Close()
 
-	dlog.Printf("connected to the controller: %v", conn.RemoteAddr())
+	agent.Ldebug.Printf("connected to the controller: %v", conn.RemoteAddr())
 
 	// Print the certificate information of the controller
 	state := conn.ConnectionState()
 	for _, cert := range state.PeerCertificates {
-		dlog.Printf("controller: issuer Name: %s\n", cert.Issuer)
-		dlog.Printf("controller: expiry: %s\n", cert.NotAfter.Format("2006-January-02"))
-		dlog.Printf("controller: common Name: %s\n", cert.Issuer.CommonName)
+		agent.Ldebug.Printf("controller: issuer Name: %s\n", cert.Issuer)
+		agent.Ldebug.Printf("controller: expiry: %s\n", cert.NotAfter.Format("2006-January-02"))
+		agent.Ldebug.Printf("controller: common Name: %s\n", cert.Issuer.CommonName)
 	}
 	// Print the state of the connection
-	dlog.Printf("controller: handshake: %v\n", state.HandshakeComplete)
-	dlog.Printf("controller: mutual: %v\n", state.NegotiatedProtocolIsMutual)
+	agent.Ldebug.Printf("controller: handshake: %v\n", state.HandshakeComplete)
+	agent.Ldebug.Printf("controller: mutual: %v\n", state.NegotiatedProtocolIsMutual)
 
 	// Create a node info object with our information
 	outboundIP := getOutboundIP()
@@ -365,14 +164,14 @@ func connController(ctx context.Context, cancel context.CancelFunc, ctrlInfo *co
 	cmd.Stdout = &out
 	err = cmd.Run()
 	if err != nil {
-		elog.Printf("failed to get `uname -a`: %v\n", err)
+		agent.Lerror.Printf("failed to get `uname -a`: %v\n", err)
 	} else {
 		uname = out.String()
 	}
 
-	dlog.Printf("outbound IP: %s\n", outboundIP)
-	dlog.Printf("mac address: %s\n", mac.String())
-	dlog.Printf("uname -a: %s\n", uname)
+	agent.Ldebug.Printf("outbound IP: %s\n", outboundIP)
+	agent.Ldebug.Printf("mac address: %s\n", mac.String())
+	agent.Ldebug.Printf("uname -a: %s\n", uname)
 
 	nodeInfo := &nodeInformation{
 		Action:       "nodeinfo",
@@ -384,14 +183,14 @@ func connController(ctx context.Context, cancel context.CancelFunc, ctrlInfo *co
 
 	jnodeInfo, err := json.Marshal(nodeInfo)
 	if err != nil {
-		dlog.Printf("failed to marshal node info request: %v\n", err)
+		agent.Ldebug.Printf("failed to marshal node info request: %v\n", err)
 		return
 	}
 
 	// Send our information to the controller
 	_, err = io.WriteString(conn, string(jnodeInfo)+"\n")
 	if err != nil {
-		dlog.Printf("failed to send the node info to the controller: %v", err)
+		agent.Ldebug.Printf("failed to send the node info to the controller: %v", err)
 		return
 	}
 
@@ -402,7 +201,7 @@ func connController(ctx context.Context, cancel context.CancelFunc, ctrlInfo *co
 
 	jkeepAlive, err := json.Marshal(keepAlive)
 	if err != nil {
-		dlog.Printf("failed to marshal the keep alive: %v\n", err)
+		agent.Ldebug.Printf("failed to marshal the keep alive: %v\n", err)
 		return
 	}
 
@@ -437,7 +236,7 @@ func connController(ctx context.Context, cancel context.CancelFunc, ctrlInfo *co
 
 		err = json.NewDecoder(conn).Decode(&switchInfo)
 		if err != nil {
-			dlog.Printf("failed to unmarshal the switch info: %v\n", err)
+			agent.Ldebug.Printf("failed to unmarshal the switch info: %v\n", err)
 			return
 		}
 
@@ -447,10 +246,10 @@ func connController(ctx context.Context, cancel context.CancelFunc, ctrlInfo *co
 				gSwitch.info.IPaddr != switchInfo.IPaddr ||
 				gSwitch.info.Netmask != switchInfo.Netmask) {
 
-			dlog.Printf("Addr: %s -- %s\n", gSwitch.info.Addr, switchInfo.Addr)
-			dlog.Printf("Port: %s -- %s\n", gSwitch.info.Port, switchInfo.Port)
-			dlog.Printf("IPaddr: %s -- %s\n", gSwitch.info.IPaddr, switchInfo.IPaddr)
-			dlog.Printf("Netmask: %s -- %s\n", gSwitch.info.Netmask, switchInfo.Netmask)
+			agent.Ldebug.Printf("Addr: %s -- %s\n", gSwitch.info.Addr, switchInfo.Addr)
+			agent.Ldebug.Printf("Port: %s -- %s\n", gSwitch.info.Port, switchInfo.Port)
+			agent.Ldebug.Printf("IPaddr: %s -- %s\n", gSwitch.info.IPaddr, switchInfo.IPaddr)
+			agent.Ldebug.Printf("Netmask: %s -- %s\n", gSwitch.info.Netmask, switchInfo.Netmask)
 
 			gSwitch.info.Addr = switchInfo.Addr
 			gSwitch.info.Port = switchInfo.Port
@@ -460,16 +259,16 @@ func connController(ctx context.Context, cancel context.CancelFunc, ctrlInfo *co
 			// FIXME
 			// replace this section once these functions are included in the tuntap library
 			cmd := exec.Command("ifconfig", utunName, gSwitch.info.IPaddr, gSwitch.info.IPaddr, "netmask", gSwitch.info.Netmask)
-			dlog.Printf("%s\n", cmd.String())
+			agent.Ldebug.Printf("%s\n", cmd.String())
 			stderr, err := cmd.StderrPipe()
 			err = cmd.Start()
 			if err != nil {
-				elog.Fatalf("failed to apply ifconfig on %v: %v\n", utunName, err)
+				agent.Lerror.Fatalf("failed to apply ifconfig on %v: %v\n", utunName, err)
 			}
 			slurp, _ := ioutil.ReadAll(stderr)
 			if err := cmd.Wait(); err != nil {
-				dlog.Printf("stderr: %v\n", slurp)
-				dlog.Fatalf("failed to apply ifconfig on %v: %v\n", utunName, err)
+				agent.Ldebug.Printf("stderr: %v\n", slurp)
+				agent.Ldebug.Fatalf("failed to apply ifconfig on %v: %v\n", utunName, err)
 			}
 
 			// We want to extract the subnet from the IP and netmask
@@ -480,21 +279,21 @@ func connController(ctx context.Context, cancel context.CancelFunc, ctrlInfo *co
 			subnet := ipv4addr.Mask(net.CIDRMask(mask.Size()))
 
 			cmd = exec.Command("route", "add", "-net", subnet.String(), gSwitch.info.IPaddr, gSwitch.info.Netmask)
-			dlog.Printf("%v\n", cmd.String())
+			agent.Ldebug.Printf("%v\n", cmd.String())
 			stderr, err = cmd.StderrPipe()
 			err = cmd.Start()
 			if err != nil {
-				elog.Fatalf("failed to add new route on %v: %v", utunName, err)
+				agent.Lerror.Fatalf("failed to add new route on %v: %v", utunName, err)
 			}
 			slurp, _ = ioutil.ReadAll(stderr)
 			if err := cmd.Wait(); err != nil {
-				dlog.Printf("stderr: %v\n", slurp)
-				dlog.Fatalf("failed to add new route on %v: %v\n", utunName, err)
+				agent.Ldebug.Printf("stderr: %v\n", slurp)
+				agent.Ldebug.Fatalf("failed to add new route on %v: %v\n", utunName, err)
 			}
 
 			// If switch is potentially running let's cancel it
 			if gSwitch.cancel != nil {
-				dlog.Printf("close the connection to the vswitch\n")
+				agent.Ldebug.Printf("close the connection to the vswitch\n")
 				gSwitch.cancel()
 				// Wait for the switch to exit
 				if gSwitch.ctx != nil {
@@ -508,7 +307,7 @@ func connController(ctx context.Context, cancel context.CancelFunc, ctrlInfo *co
 		// If the connection to the vswitch is not established, start it
 		if gSwitch.ctx == nil {
 			gSwitch.ctx, gSwitch.cancel = context.WithCancel(context.Background())
-			dlog.Printf("start the connection to the vswitch\n")
+			agent.Ldebug.Printf("start the connection to the vswitch\n")
 			go connSwitch(gSwitch.ctx, gSwitch.cancel, config)
 		}
 
@@ -542,23 +341,23 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 	var err error
 	vswitchConn, err = tls.Dial("tcp", gSwitch.info.Addr+":"+gSwitch.info.Port, config)
 	if err != nil {
-		elog.Printf("failed to dial the vswitch: %v", err)
+		agent.Lerror.Printf("failed to dial the vswitch: %v", err)
 		return
 	}
 	defer vswitchConn.Close()
 
-	dlog.Printf("connected to the vswitch: %v", vswitchConn.RemoteAddr())
+	agent.Ldebug.Printf("connected to the vswitch: %v", vswitchConn.RemoteAddr())
 
 	// Print the certificate information of the vswitch
 	state = vswitchConn.ConnectionState()
 	for _, cert := range state.PeerCertificates {
-		dlog.Printf("vswitch: issuer Name: %s\n", cert.Issuer)
-		dlog.Printf("vswitch: expiry: %s \n", cert.NotAfter.Format("2006-January-02"))
-		dlog.Printf("vswitch: common Name: %s \n", cert.Issuer.CommonName)
+		agent.Ldebug.Printf("vswitch: issuer Name: %s\n", cert.Issuer)
+		agent.Ldebug.Printf("vswitch: expiry: %s \n", cert.NotAfter.Format("2006-January-02"))
+		agent.Ldebug.Printf("vswitch: common Name: %s \n", cert.Issuer.CommonName)
 	}
 	// Pint the state of the connection
-	dlog.Printf("vswich: handshake: %v\n", state.HandshakeComplete)
-	dlog.Printf("vswitch: client: mutual: %v\n", state.NegotiatedProtocolIsMutual)
+	agent.Ldebug.Printf("vswich: handshake: %v\n", state.HandshakeComplete)
+	agent.Ldebug.Printf("vswitch: client: mutual: %v\n", state.NegotiatedProtocolIsMutual)
 
 	// Prepare the keep alive ticker
 	nvhdr = &nvHdr{
@@ -576,16 +375,16 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 			select {
 			case <-ctx.Done():
 				// the vswitch is done
-				dlog.Printf("vswitch connection closing, context is done\n")
+				agent.Ldebug.Printf("vswitch connection closing, context is done\n")
 				return
 				// the ticker is done
 			case <-done:
-				dlog.Printf("vswitch connection closing, ticker is done\n")
+				agent.Ldebug.Printf("vswitch connection closing, ticker is done\n")
 				return
 			case <-ticker.C:
 				_, err := vswitchConn.Write(keepaliveBuf.Bytes())
 				if err != nil {
-					dlog.Printf("got disconnected from the switch: %v\n", err)
+					agent.Ldebug.Printf("got disconnected from the switch: %v\n", err)
 					// the agent got disconnected from the vswitch
 					ticker.Stop()
 					done <- true
@@ -608,7 +407,7 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 			// Read the NV header first.
 			n, err := io.ReadFull(vswitchConn, frameBuf[0:4])
 			if err == io.ErrUnexpectedEOF || err == io.ErrShortBuffer {
-				dlog.Printf("failed to read NV header from vswitch: %v\n", err)
+				agent.Ldebug.Printf("failed to read NV header from vswitch: %v\n", err)
 				return
 			}
 			// Move the offset after we've read more bytes into the buffer
@@ -634,7 +433,7 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 		if offset >= 4 && length > 2 { // try to read the whole frame
 			n, err = io.ReadFull(vswitchConn, frameBuf[offset:offset+int(length)-2-offset+4])
 			if err == io.ErrUnexpectedEOF || err == io.ErrShortBuffer {
-				dlog.Printf("failed to read payload from vswitch: %v\n", err)
+				agent.Ldebug.Printf("failed to read payload from vswitch: %v\n", err)
 				return
 			}
 			// Move the offset after we've read more bytes into the buffer
@@ -655,9 +454,9 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 			break
 		case 1:
 			// We just received an ethernet frame from the server
-			dlog.Printf("length: %d -- type: %d\n", length, nvType)
+			agent.Ldebug.Printf("length: %d -- type: %d\n", length, nvType)
 
-			dlog.Printf("DST MAC: %02x:%02x:%02x:%02x:%02x:%02x\n",
+			agent.Ldebug.Printf("DST MAC: %02x:%02x:%02x:%02x:%02x:%02x\n",
 				frameBuf[4:5],
 				frameBuf[5:6],
 				frameBuf[6:7],
@@ -665,7 +464,7 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 				frameBuf[8:9],
 				frameBuf[9:10])
 
-			dlog.Printf("SRC MAC: %02x:%02x:%02x:%02x:%02x:%02x\n",
+			agent.Ldebug.Printf("SRC MAC: %02x:%02x:%02x:%02x:%02x:%02x\n",
 				frameBuf[10:11],
 				frameBuf[11:12],
 				frameBuf[12:13],
@@ -674,7 +473,7 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 				frameBuf[15:16])
 
 			etherType := binary.BigEndian.Uint16(frameBuf[16:18])
-			dlog.Printf("Ethertype %04x\n", etherType)
+			agent.Ldebug.Printf("Ethertype %04x\n", etherType)
 			if etherType == agent.TypeARP {
 
 				oper := binary.BigEndian.Uint16(frameBuf[24:26])
@@ -689,41 +488,41 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 
 				tpa := net.IPv4(frameBuf[42], frameBuf[43], frameBuf[44], frameBuf[45]).To4()
 
-				dlog.Printf("ARP HTYPE: %x\n", binary.BigEndian.Uint16(frameBuf[18:20]))
-				dlog.Printf("ARP PTYPE: %x\n", binary.BigEndian.Uint16(frameBuf[20:22]))
-				dlog.Printf("ARP HLEN: %x\n", binary.BigEndian.Uint16(frameBuf[22:24])>>8)
-				dlog.Printf("ARP PLEN: %x\n", binary.BigEndian.Uint16(frameBuf[22:24])&0x0F)
-				dlog.Printf("ARP OPER: %x\n", oper)
-				dlog.Printf("ARP SHA: %s\n", sha.String())
-				dlog.Printf("ARP SPA: %s\n", spa.String())
-				dlog.Printf("ARP THA: %s\n", tha)
-				dlog.Printf("ARP TPA: %s\n", tpa.String())
+				agent.Ldebug.Printf("ARP HTYPE: %x\n", binary.BigEndian.Uint16(frameBuf[18:20]))
+				agent.Ldebug.Printf("ARP PTYPE: %x\n", binary.BigEndian.Uint16(frameBuf[20:22]))
+				agent.Ldebug.Printf("ARP HLEN: %x\n", binary.BigEndian.Uint16(frameBuf[22:24])>>8)
+				agent.Ldebug.Printf("ARP PLEN: %x\n", binary.BigEndian.Uint16(frameBuf[22:24])&0x0F)
+				agent.Ldebug.Printf("ARP OPER: %x\n", oper)
+				agent.Ldebug.Printf("ARP SHA: %s\n", sha.String())
+				agent.Ldebug.Printf("ARP SPA: %s\n", spa.String())
+				agent.Ldebug.Printf("ARP THA: %s\n", tha)
+				agent.Ldebug.Printf("ARP TPA: %s\n", tpa.String())
 
 				if oper == agent.OperationReply {
-					dlog.Printf("Received ARP response\n")
+					agent.Ldebug.Printf("Received ARP response\n")
 					// We received an ARP response
 					err := arpTable.Update(spa.String(), sha)
 					if err != nil {
-						elog.Printf("unable to update ARP entry: %v", err)
+						agent.Lerror.Printf("unable to update ARP entry: %v", err)
 					}
 				} else if oper == agent.OperationRequest {
-					dlog.Printf("Received ARP request\n")
+					agent.Ldebug.Printf("Received ARP request\n")
 					// We received an ARP request, send a response
 					sendBuf := agent.GenerateARPReply(gMAC[0:6], sha, tpa, spa)
 
 					b, err := vswitchConn.Write(sendBuf)
 					if err != nil {
-						elog.Printf("failed to write frame to %s\n", utunName)
+						agent.Lerror.Printf("failed to write frame to %s\n", utunName)
 					}
-					dlog.Printf("wrote %d bytes to vswitch\n", b)
+					agent.Ldebug.Printf("wrote %d bytes to vswitch\n", b)
 				}
 			} else {
 				// IP  -> 0x0800
 				b, err := utun.Write(frameBuf[4+14 : offset])
 				if err != nil {
-					elog.Printf("failed to write to the utun device: %v\n", err)
+					agent.Lerror.Printf("failed to write to the utun device: %v\n", err)
 				}
-				dlog.Printf("wrote %d bytes to the utun device\n", b)
+				agent.Ldebug.Printf("wrote %d bytes to the utun device\n", b)
 			}
 		default:
 			return
@@ -737,20 +536,20 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 func connectNetwork(networkName string) {
 
 	var certNetInfo certNetInformation
-	var networkCred networkCredentials
+	var networkCred agent.NetworkCredentials
 	var arrayCtrlInfo arrayControllerInfo
-	var netConf netvfyConfig
+	var netConf agent.Ndb
 	var i int
 
 	// Read the configuration file
 	byteValue, err := ioutil.ReadFile(gNetConfPath)
 	if err != nil {
-		elog.Fatalf("failed to read the configuration file: %v\n", err)
+		agent.Lerror.Fatalf("failed to read the configuration file: %v\n", err)
 	}
 
 	err = json.Unmarshal(byteValue, &netConf)
 	if err != nil {
-		elog.Fatalf("failed to unmarshal the network configuration: %v\n", err)
+		agent.Lerror.Fatalf("failed to unmarshal the network configuration: %v\n", err)
 	}
 
 	// Find the network in the list
@@ -762,13 +561,13 @@ func connectNetwork(networkName string) {
 	}
 
 	if i >= len(netConf.Networks) {
-		elog.Fatalf("failed to find the selected network: %v\n", networkName)
+		agent.Lerror.Fatalf("failed to find the selected network: %v\n", networkName)
 	}
 
-	dlog.Printf("Name: %s\n", networkCred.Name)
-	dlog.Printf("Cert: %s\n", networkCred.Cert)
-	dlog.Printf("CAcert: %s\n", networkCred.CAcert)
-	dlog.Printf("PVkey: %s\n", networkCred.PVkey)
+	agent.Ldebug.Printf("Name: %s\n", networkCred.Name)
+	agent.Ldebug.Printf("Cert: %s\n", networkCred.Cert)
+	agent.Ldebug.Printf("CAcert: %s\n", networkCred.CAcert)
+	agent.Ldebug.Printf("PVkey: %s\n", networkCred.PVkey)
 
 	// Parse the Certificate and Private key to form the tls Certificate
 	tlsCert, err := tls.X509KeyPair([]byte(networkCred.Cert), []byte(networkCred.PVkey))
@@ -777,19 +576,19 @@ func connectNetwork(networkName string) {
 	// that will allow us to extract the Subject field
 	block, _ := pem.Decode([]byte(networkCred.Cert))
 	if block == nil {
-		elog.Fatal("failed to parse the certificate in PEM format")
+		agent.Lerror.Fatal("failed to parse the certificate in PEM format")
 	}
 	x509cert, err := x509.ParseCertificate(block.Bytes)
 	if err != nil {
-		elog.Fatalf("failed to convert the certificate to x509 format: %v\n", err)
+		agent.Lerror.Fatalf("failed to convert the certificate to x509 format: %v\n", err)
 	}
 
-	dlog.Printf("Certificate Subject: %v\n", x509cert.Subject)
+	agent.Ldebug.Printf("Certificate Subject: %v\n", x509cert.Subject)
 
 	// Parse the network information from the Subject
 	values, err := url.ParseQuery(strings.TrimLeft(x509cert.Subject.String(), "CN="))
 	if err != nil {
-		elog.Fatalf("failed to parse the network information from the certificate subject: %v\n", err)
+		agent.Lerror.Fatalf("failed to parse the network information from the certificate subject: %v\n", err)
 	}
 
 	certNetInfo.Version = values.Get("v")
@@ -798,16 +597,16 @@ func connectNetwork(networkName string) {
 	certNetInfo.NodeUID = values.Get("n")
 
 	if certNetInfo.Version == "" {
-		elog.Fatal("failed to find the version from the certificate subject")
+		agent.Lerror.Fatal("failed to find the version from the certificate subject")
 	}
 	if certNetInfo.Type == "" {
-		elog.Fatal("failed to find the type from the certificate subject")
+		agent.Lerror.Fatal("failed to find the type from the certificate subject")
 	}
 	if certNetInfo.NetworkUID == "" {
-		elog.Fatal("failed to find the network UID from the certificate subject")
+		agent.Lerror.Fatal("failed to find the network UID from the certificate subject")
 	}
 	if certNetInfo.NodeUID == "" {
-		elog.Fatal("failed to find the node UID from the certificate subject")
+		agent.Lerror.Fatal("failed to find the node UID from the certificate subject")
 	}
 
 	// Setup the tls Configuration, add the trusted CAcert
@@ -831,10 +630,10 @@ func connectNetwork(networkName string) {
 
 	jnetinfosReq, err := json.Marshal(netinfosReq)
 	if err != nil {
-		elog.Fatalf("failed to marshal the network info request: %v\n", err)
+		agent.Lerror.Fatalf("failed to marshal the network info request: %v\n", err)
 	}
 
-	dlog.Printf("network info request: %s\n", jnetinfosReq)
+	agent.Ldebug.Printf("network info request: %s\n", jnetinfosReq)
 
 	// Setup the http request that will carry our json request
 	timeout := time.Duration(5 * time.Second)
@@ -844,14 +643,14 @@ func connectNetwork(networkName string) {
 
 	request, err := http.NewRequest("POST", "https://"+networkCred.APIsrv+"/v1/netinfos", bytes.NewBuffer(jnetinfosReq))
 	if err != nil {
-		elog.Printf("failed to create a new https request: %v\n", err)
+		agent.Lerror.Printf("failed to create a new https request: %v\n", err)
 		return
 	}
 	request.Header.Set("Content-Type", "application/json")
 
 	resp, err := client.Do(request)
 	if err != nil {
-		elog.Printf("failed network info request: %v\n", err)
+		agent.Lerror.Printf("failed network info request: %v\n", err)
 		return
 	}
 	defer resp.Body.Close()
@@ -859,27 +658,27 @@ func connectNetwork(networkName string) {
 	// Read the response to our request
 	buf, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		elog.Printf("failed to parse network info response: %v\n", err)
+		agent.Lerror.Printf("failed to parse network info response: %v\n", err)
 		return
 	}
 
-	dlog.Printf("netinfos: %v\n", string(buf))
+	agent.Ldebug.Printf("netinfos: %v\n", string(buf))
 
 	err = json.Unmarshal(buf, &arrayCtrlInfo)
 	if err != nil {
-		elog.Fatalf("failed to unmarshal the controller information: %v\n", err)
+		agent.Lerror.Fatalf("failed to unmarshal the controller information: %v\n", err)
 	}
 
 	if len(arrayCtrlInfo.NetInfos) <= 0 {
-		elog.Fatalf("failed to receive the controller information\n")
+		agent.Lerror.Fatalf("failed to receive the controller information\n")
 	}
 
-	dlog.Printf("result: %v\n", arrayCtrlInfo)
+	agent.Ldebug.Printf("result: %v\n", arrayCtrlInfo)
 
-	dlog.Printf("ctrlInfo.Family: %s\n", arrayCtrlInfo.NetInfos[0].Family)
-	dlog.Printf("ctrlInfo.Addr: %s\n", arrayCtrlInfo.NetInfos[0].Addr)
-	dlog.Printf("ctrlInfo.Port: %s\n", arrayCtrlInfo.NetInfos[0].Port)
-	dlog.Printf("ctrlInfo.Region: %s\n", arrayCtrlInfo.NetInfos[0].Region)
+	agent.Ldebug.Printf("ctrlInfo.Family: %s\n", arrayCtrlInfo.NetInfos[0].Family)
+	agent.Ldebug.Printf("ctrlInfo.Addr: %s\n", arrayCtrlInfo.NetInfos[0].Addr)
+	agent.Ldebug.Printf("ctrlInfo.Port: %s\n", arrayCtrlInfo.NetInfos[0].Port)
+	agent.Ldebug.Printf("ctrlInfo.Region: %s\n", arrayCtrlInfo.NetInfos[0].Region)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	connController(ctx, cancel, &arrayCtrlInfo.NetInfos[0], &config)
@@ -887,19 +686,19 @@ func connectNetwork(networkName string) {
 
 func deleteNetwork(networkName string) {
 
-	var netConf netvfyConfig
+	var netConf agent.Ndb
 	var found bool
 	var i int
 
 	// Read the configuration file
 	byteValue, err := ioutil.ReadFile(gNetConfPath)
 	if err != nil {
-		elog.Fatalf("failed to read the configuration file: %v\n", err)
+		agent.Lerror.Fatalf("failed to read the configuration file: %v\n", err)
 	}
 
 	err = json.Unmarshal(byteValue, &netConf)
 	if err != nil {
-		elog.Fatalf("failed to unmarshal the network configuration: %v\n", err)
+		agent.Lerror.Fatalf("failed to unmarshal the network configuration: %v\n", err)
 	}
 
 	// Find the network to delete
@@ -912,17 +711,17 @@ func deleteNetwork(networkName string) {
 	}
 
 	if found == false {
-		elog.Fatalf("failed to delete network `%v`: not found\n", networkName)
+		agent.Lerror.Fatalf("failed to delete network `%v`: not found\n", networkName)
 	}
 
 	marshaledJSON, err := json.MarshalIndent(netConf, "", " ")
 	if err != nil {
-		elog.Fatalf("failed to marshal the network configuration: %v\n", err)
+		agent.Lerror.Fatalf("failed to marshal the network configuration: %v\n", err)
 	}
 
 	err = ioutil.WriteFile(gNetConfPath, marshaledJSON, 0644)
 	if err != nil {
-		elog.Fatalf("failed to save the network configuration: %v\n", err)
+		agent.Lerror.Fatalf("failed to save the network configuration: %v\n", err)
 	}
 
 }
@@ -933,13 +732,13 @@ func listNetworks() {
 
 	ndb, err := agent.FetchNetworks(gNetConfPath)
 	if err != nil {
-		elog.Fatalf("listNetworks: %s\n", err)
+		agent.Lerror.Fatalf("listNetworks: %s\n", err)
 	}
 
-	ilog.Printf("Provisioned Networks:\n")
+	agent.Linfo.Printf("Provisioned Networks:\n")
 	// Find the network in the list
 	for i = 0; i < len(ndb.Networks); i++ {
-		ilog.Printf("\t%s\n", ndb.Networks[i].Name)
+		agent.Linfo.Printf("\t%s\n", ndb.Networks[i].Name)
 	}
 }
 
@@ -955,14 +754,14 @@ func main() {
 	flag.Parse()
 
 	// Enable debug log level
-	var dlogOut io.Writer = ioutil.Discard
+	var LdebugOut io.Writer = ioutil.Discard
 	if *verbose == true {
-		dlogOut = os.Stdout
+		LdebugOut = os.Stdout
 	}
 
-	dlog = log.New(dlogOut, "debug: ", log.Ldate|log.Ltime|log.Lshortfile)
-	ilog = log.New(os.Stdout, "", 0)
-	elog = log.New(os.Stdout, "error: ", log.Ldate|log.Ltime|log.Lshortfile)
+	agent.Ldebug = log.New(LdebugOut, "debug: ", log.Ldate|log.Ltime|log.Lshortfile)
+	agent.Linfo = log.New(os.Stdout, "", 0)
+	agent.Lerror = log.New(os.Stdout, "error: ", log.Ldate|log.Ltime|log.Lshortfile)
 
 	// Setup ARP structs.
 	arpQueue = agent.NewARPQueue(arpQueueMax)
@@ -971,7 +770,10 @@ func main() {
 	gNetConfPath = agent.GetNdbPath()
 
 	if *provLink != "" {
-		provisioning(*provLink, *netLabel)
+		err := agent.ProvisionNetwork(*provLink, *netLabel)
+		if err != nil {
+			agent.Lerror.Fatal(err)
+		}
 		return
 	} else if *list == true {
 		listNetworks()
@@ -986,7 +788,7 @@ func main() {
 		config.Name = utunName
 		utun, err = water.New(config)
 		if err != nil {
-			elog.Fatalf("failed to initialize the %s interface: %v\n", utunName, err)
+			agent.Lerror.Fatalf("failed to initialize the %s interface: %v\n", utunName, err)
 		}
 
 		go func() {
@@ -994,9 +796,9 @@ func main() {
 			for {
 				n, err := utun.Read(frameBuf[4+14:])
 				if err != nil {
-					elog.Printf("failed to read from %s: %v\n", utunName, err)
+					agent.Lerror.Printf("failed to read from %s: %v\n", utunName, err)
 				}
-				dlog.Printf("read %d bytes from %s\n", n, utunName)
+				agent.Ldebug.Printf("read %d bytes from %s\n", n, utunName)
 
 				if vswitchConn == nil {
 					continue
@@ -1012,7 +814,7 @@ func main() {
 				dstIP := net.IPv4(frameBuf[34], frameBuf[35], frameBuf[36], frameBuf[37]).To4()
 				entry, found, err := arpTable.Get(dstIP.String())
 				if err != nil {
-					elog.Printf("unable to retrieve ARP entry for %v: %v", dstIP.String(), err)
+					agent.Lerror.Printf("unable to retrieve ARP entry for %v: %v", dstIP.String(), err)
 				}
 
 				if found {
@@ -1026,25 +828,25 @@ func main() {
 
 					b, err := vswitchConn.Write(frameBuf[0 : 4+14+n])
 					if err != nil {
-						elog.Printf("failed to write frame to %s\n", utunName)
+						agent.Lerror.Printf("failed to write frame to %s\n", utunName)
 					}
-					dlog.Printf("wrote %d bytes to vswitch\n", b)
+					agent.Ldebug.Printf("wrote %d bytes to vswitch\n", b)
 
 				} else {
 
 					// TODO: Queue ethernet frame while ARP is being resolving the dst MAC address
 
-					dlog.Printf("Sending an ARP request !\n")
+					agent.Ldebug.Printf("Sending an ARP request !\n")
 					sendBuf, err := agent.GenerateARPRequest(arpTable, gMAC, dstIP.String(), gSwitch.info.IPaddr)
 					if err != nil {
-						elog.Printf("unable to generate ARP request: %v", err)
+						agent.Lerror.Printf("unable to generate ARP request: %v", err)
 					}
 
 					b, err := vswitchConn.Write(sendBuf)
 					if err != nil {
-						elog.Printf("failed to write frame to the switch: %v\n", err)
+						agent.Lerror.Printf("failed to write frame to the switch: %v\n", err)
 					}
-					dlog.Printf("wrote %d bytes to vswitch\n", b)
+					agent.Ldebug.Printf("wrote %d bytes to vswitch\n", b)
 
 				}
 			}
