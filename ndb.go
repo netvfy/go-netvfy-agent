@@ -76,6 +76,35 @@ func FetchNetworks(ndbPath string) (*Ndb, error) {
 	return &ndb, nil
 }
 
+func GetNetworkCred(networkName string) (bool, *NetworkCredentials, error) {
+
+	var i int
+	var netConf Ndb
+	var networkCred NetworkCredentials
+
+	// Read the configuration file
+	byteValue, err := ioutil.ReadFile(GetNdbPath())
+	if err != nil {
+		return false, nil, fmt.Errorf("GetNetworkCred: failed to read the configuration file: %v\n", err)
+	}
+
+	err = json.Unmarshal(byteValue, &netConf)
+	if err != nil {
+		return false, nil, fmt.Errorf("GetNetworkCred: failed to unmarshal the network configuration: %v\n", err)
+	}
+
+	// Find the network in the list
+	for i = 0; i < len(netConf.Networks); i++ {
+		networkCred = netConf.Networks[i]
+		if networkCred.Name == networkName {
+			return true, &networkCred, nil
+		}
+	}
+
+	// Nothing found
+	return false, nil, nil
+}
+
 func DeleteNetwork(ndbPath string, networkName string) error {
 
 	var i int
@@ -119,14 +148,17 @@ func DeleteNetwork(ndbPath string, networkName string) error {
 	return nil
 }
 
-func ProvisionNetwork(provLink string, netLabel string) error {
+func ProvisionNetwork(provLink string, networkName string) error {
 
 	var netConf Ndb
 	var networkCred NetworkCredentials
 	var provInfo ProvInformation
 	var marshaledJSON []byte
 
-	// FIXME: make sure the netLabel doesn't exist yet
+	found, _, _ := GetNetworkCred(networkName)
+	if found {
+		return fmt.Errorf("ProvisionNetwork: the network name already exist: %s\n", networkName)
+	}
 
 	Ldebug.Printf("provLink: %s\n", provLink)
 
@@ -252,7 +284,7 @@ func ProvisionNetwork(provLink string, netLabel string) error {
 	}
 
 	// If no network name was provided, ask for one
-	networkCred.Name = netLabel
+	networkCred.Name = networkName
 	if networkCred.Name == "" {
 		Linfo.Print("Enter the name of the new network: ")
 		reader := bufio.NewReader(os.Stdin)
