@@ -684,48 +684,6 @@ func connectNetwork(networkName string) {
 	connController(ctx, cancel, &arrayCtrlInfo.NetInfos[0], &config)
 }
 
-func deleteNetwork(networkName string) {
-
-	var netConf agent.Ndb
-	var found bool
-	var i int
-
-	// Read the configuration file
-	byteValue, err := ioutil.ReadFile(gNetConfPath)
-	if err != nil {
-		agent.Lerror.Fatalf("failed to read the configuration file: %v\n", err)
-	}
-
-	err = json.Unmarshal(byteValue, &netConf)
-	if err != nil {
-		agent.Lerror.Fatalf("failed to unmarshal the network configuration: %v\n", err)
-	}
-
-	// Find the network to delete
-	for i = 0; i < len(netConf.Networks); i++ {
-		if netConf.Networks[i].Name == networkName {
-			netConf.Networks = append(netConf.Networks[:i], netConf.Networks[i+1:]...)
-			found = true
-			break
-		}
-	}
-
-	if found == false {
-		agent.Lerror.Fatalf("failed to delete network `%v`: not found\n", networkName)
-	}
-
-	marshaledJSON, err := json.MarshalIndent(netConf, "", " ")
-	if err != nil {
-		agent.Lerror.Fatalf("failed to marshal the network configuration: %v\n", err)
-	}
-
-	err = ioutil.WriteFile(gNetConfPath, marshaledJSON, 0644)
-	if err != nil {
-		agent.Lerror.Fatalf("failed to save the network configuration: %v\n", err)
-	}
-
-}
-
 func listNetworks() {
 
 	var i int
@@ -857,7 +815,7 @@ func main() {
 			time.Sleep(3 * time.Second)
 		}
 	} else if *delete != "" {
-		deleteNetwork(*delete)
+		agent.DeleteNetwork(*delete)
 	} else {
 		flag.PrintDefaults()
 	}

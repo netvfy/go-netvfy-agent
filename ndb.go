@@ -105,14 +105,14 @@ func GetNetworkCred(networkName string) (bool, *NetworkCredentials, error) {
 	return false, nil, nil
 }
 
-func DeleteNetwork(ndbPath string, networkName string) error {
+func DeleteNetwork(networkName string) error {
 
 	var i int
 	var ndb Ndb
 	var found bool
 
 	// Read the configuration file
-	byteValue, err := ioutil.ReadFile(ndbPath)
+	byteValue, err := ioutil.ReadFile(GetNdbPath())
 	if err != nil {
 		return fmt.Errorf("DeleteNetwork: failed to read the configuration file: %v", err)
 	}
@@ -140,7 +140,7 @@ func DeleteNetwork(ndbPath string, networkName string) error {
 		return fmt.Errorf("DeleteNetwork: failed to marshal the network configuration: %v", err)
 	}
 
-	err = ioutil.WriteFile(ndbPath, marshaledJSON, 0644)
+	err = ioutil.WriteFile(GetNdbPath(), marshaledJSON, 0644)
 	if err != nil {
 		return fmt.Errorf("DeleteNetwork: failed to save the network configuration: %v", err)
 	}
