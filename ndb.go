@@ -258,9 +258,8 @@ func ProvisionNetwork(provLink string, networkName string) error {
 
 	Ldebug.Printf("CSR request: %s\n", jreq)
 
-	timeout := time.Duration(5 * time.Second)
 	client := http.Client{
-		Timeout: timeout,
+		Timeout: time.Duration(5 * time.Second),
 	}
 	request, err := http.NewRequest("POST", "https://"+provInfo.APIsrv+"/v1/provisioning", bytes.NewBuffer(jreq))
 	if err != nil {
