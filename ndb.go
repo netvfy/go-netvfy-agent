@@ -79,7 +79,6 @@ func FetchNetworks(ndbPath string) (*Ndb, error) {
 // GetNetworkCred returns the credentials of the specified network name if the network exist
 func GetNetworkCred(networkName string) (*NetworkCredentials, error) {
 
-	var i int
 	var netConf Ndb
 	var networkCred NetworkCredentials
 
@@ -95,7 +94,7 @@ func GetNetworkCred(networkName string) (*NetworkCredentials, error) {
 	}
 
 	// Find the network in the list
-	for i = 0; i < len(netConf.Networks); i++ {
+	for i := 0; i < len(netConf.Networks); i++ {
 		networkCred = netConf.Networks[i]
 		if networkCred.Name == networkName {
 			return &networkCred, nil
