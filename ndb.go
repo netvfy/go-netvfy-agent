@@ -76,7 +76,7 @@ func FetchNetworks(ndbPath string) (*Ndb, error) {
 	return &ndb, nil
 }
 
-func GetNetworkCred(networkName string) (bool, *NetworkCredentials, error) {
+func GetNetworkCred(networkName string) (*NetworkCredentials, error) {
 
 	var i int
 	var netConf Ndb
@@ -85,24 +85,24 @@ func GetNetworkCred(networkName string) (bool, *NetworkCredentials, error) {
 	// Read the configuration file
 	byteValue, err := ioutil.ReadFile(GetNdbPath())
 	if err != nil {
-		return false, nil, fmt.Errorf("GetNetworkCred: failed to read the configuration file: %v\n", err)
+		return nil, fmt.Errorf("GetNetworkCred: failed to read the configuration file: %v\n", err)
 	}
 
 	err = json.Unmarshal(byteValue, &netConf)
 	if err != nil {
-		return false, nil, fmt.Errorf("GetNetworkCred: failed to unmarshal the network configuration: %v\n", err)
+		return nil, fmt.Errorf("GetNetworkCred: failed to unmarshal the network configuration: %v\n", err)
 	}
 
 	// Find the network in the list
 	for i = 0; i < len(netConf.Networks); i++ {
 		networkCred = netConf.Networks[i]
 		if networkCred.Name == networkName {
-			return true, &networkCred, nil
+			return &networkCred, nil
 		}
 	}
 
 	// Nothing found
-	return false, nil, nil
+	return nil, nil
 }
 
 func DeleteNetwork(networkName string) error {
@@ -155,8 +155,8 @@ func ProvisionNetwork(provLink string, networkName string) error {
 	var provInfo provInformation
 	var marshaledJSON []byte
 
-	found, _, _ := GetNetworkCred(networkName)
-	if found {
+	cred, _ := GetNetworkCred(networkName)
+	if cred == nil {
 		return fmt.Errorf("ProvisionNetwork: the network name already exist: %s\n", networkName)
 	}
 
