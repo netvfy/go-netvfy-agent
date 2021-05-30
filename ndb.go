@@ -148,6 +148,7 @@ func DeleteNetwork(networkName string) error {
 	return nil
 }
 
+// ProvisionNetwork provision a new network based on the provisioned linked
 func ProvisionNetwork(provLink string, networkName string) error {
 
 	var netConf Ndb
