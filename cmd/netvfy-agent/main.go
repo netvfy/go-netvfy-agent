@@ -725,6 +725,8 @@ func main() {
 	arpQueue = agent.NewARPQueue(arpQueueMax)
 	arpTable = &agent.ArpTable{}
 
+	// FIXME: remove that variable and all direct access to ndb
+	// should be done through ndb.go
 	gNetConfPath = agent.GetNdbPath()
 
 	if *provLink != "" {
