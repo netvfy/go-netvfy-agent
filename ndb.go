@@ -177,6 +177,7 @@ func ProvisionNetwork(provLink string, networkName string) error {
 	}
 
 	// Extract the fields from the provisioning link
+	// FIXME create a function that validate and return a provInfo
 	provInfo.Version = values.Get("v")
 	provInfo.APIsrv = values.Get("a")
 	provInfo.NetworkUID = values.Get("w")
