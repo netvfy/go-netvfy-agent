@@ -104,6 +104,7 @@ func GetNetworkCred(networkName string) (*NetworkCredentials, error) {
 	return nil, nil
 }
 
+// DeleteNetwork delete the network specified in parameter
 func DeleteNetwork(networkName string) error {
 
 	var i int
