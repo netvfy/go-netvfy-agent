@@ -30,8 +30,8 @@ type NetworkCredentials struct {
 	CAcert string `json:"cacert"`
 }
 
-// ProvInformation is the provisioning information contains in the prov link
-type ProvInformation struct {
+// provInformation is the provisioning information contains in the prov link
+type provInformation struct {
 	Version    string
 	APIsrv     string
 	NetworkUID string
@@ -39,8 +39,8 @@ type ProvInformation struct {
 	Key        string
 }
 
-// CSRrequest is the Certificate Signing Request
-type CSRrequest struct {
+// csrRequest is the Certificate Signing Request
+type csrRequest struct {
 	CSR      string `json:"csr"`
 	ProvLink string `json:"provlink"`
 }
@@ -152,7 +152,7 @@ func ProvisionNetwork(provLink string, networkName string) error {
 
 	var netConf Ndb
 	var networkCred NetworkCredentials
-	var provInfo ProvInformation
+	var provInfo provInformation
 	var marshaledJSON []byte
 
 	found, _, _ := GetNetworkCred(networkName)
@@ -244,7 +244,7 @@ func ProvisionNetwork(provLink string, networkName string) error {
 	Ldebug.Printf("CSR: %s\n", csr)
 
 	// Prepare the HTTP request asking to sign our CSR
-	req := CSRrequest{
+	req := csrRequest{
 		CSR:      string(csr),
 		ProvLink: provLink,
 	}
