@@ -80,7 +80,6 @@ func FetchNetworks(ndbPath string) (*Ndb, error) {
 func GetNetworkCred(networkName string) (*NetworkCredentials, error) {
 
 	var netConf Ndb
-	var networkCred NetworkCredentials
 
 	// Read the configuration file
 	byteValue, err := ioutil.ReadFile(GetNdbPath())
@@ -95,7 +94,7 @@ func GetNetworkCred(networkName string) (*NetworkCredentials, error) {
 
 	// Find the network in the list
 	for i := 0; i < len(netConf.Networks); i++ {
-		networkCred = netConf.Networks[i]
+		networkCred := netConf.Networks[i]
 		if networkCred.Name == networkName {
 			return &networkCred, nil
 		}
