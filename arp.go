@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"log"
 	"net"
 	"sync"
 	"time"
@@ -62,7 +61,7 @@ func (t *ArpTable) Add(IP string) error {
 
 	// Check if an entry already exist before adding one.
 	_, ok := t.ArpMap.Load(IP)
-	if ok == false {
+	if !ok {
 		ip := net.ParseIP(IP)
 		t.ArpMap.Store(IP, &ArpEntry{IP: ip, Mac: nil, Status: StatusWaiting, Timestamp: time.Now()})
 	}
@@ -114,8 +113,6 @@ type ARPQueue struct {
 	list.List
 	// max length of buffer
 	length uint
-	// logger
-	ll log.Logger
 }
 
 // ArpQueueEntry has string representation of IP along with buffers.
