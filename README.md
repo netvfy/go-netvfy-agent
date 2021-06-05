@@ -28,4 +28,5 @@ $ make netvfy-agent
 
 ## Deployment 
 
-TBD. 
+TODO: 
+- setup CI/CD that runs make commands to lint, check, etc. 

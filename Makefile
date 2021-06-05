@@ -16,4 +16,4 @@ vet:
 	go vet ./...
 
 netvfy-agent: 
-	go build -o netvfy-agent cmd/netvfy-agent/main.go 
+	go build -o netvfy-agent cmd/netvfy-agent/main.go
