@@ -13,12 +13,20 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+)
+
+var (
+	// FIXME: Look into whether log.Logger is okay or whether to use logrus.Logger
+	Ldebug *log.Logger
+	Linfo  *log.Logger
+	Lerror *log.Logger
 )
 
 // NetworkCredentials is the network informations.
@@ -60,14 +68,13 @@ func GetNdbPath() string {
 // FetchNetworks returns a populated network database object.
 func FetchNetworks(ndbPath string) (*Ndb, error) {
 
-	var ndb Ndb
-
 	// Read the network database
 	byteValue, err := ioutil.ReadFile(ndbPath)
 	if err != nil {
 		return nil, fmt.Errorf("FetchNetworks: failed to read the network database: %v", err)
 	}
 
+	var ndb Ndb
 	err = json.Unmarshal(byteValue, &ndb)
 	if err != nil {
 		return nil, fmt.Errorf("FetchNetworks: failed to unmarshal the network database: %v", err)
@@ -79,17 +86,16 @@ func FetchNetworks(ndbPath string) (*Ndb, error) {
 // GetNetworkCred returns the credentials of the specified network name if the network exist
 func GetNetworkCred(networkName string) (*NetworkCredentials, error) {
 
-	var netConf Ndb
-
 	// Read the configuration file
 	byteValue, err := ioutil.ReadFile(GetNdbPath())
 	if err != nil {
-		return nil, fmt.Errorf("GetNetworkCred: failed to read the configuration file: %v\n", err)
+		return nil, fmt.Errorf("GetNetworkCred: failed to read the configuration file: %v", err)
 	}
 
+	var netConf Ndb
 	err = json.Unmarshal(byteValue, &netConf)
 	if err != nil {
-		return nil, fmt.Errorf("GetNetworkCred: failed to unmarshal the network configuration: %v\n", err)
+		return nil, fmt.Errorf("GetNetworkCred: failed to unmarshal the network configuration: %v", err)
 	}
 
 	// Find the network in the list
@@ -107,23 +113,21 @@ func GetNetworkCred(networkName string) (*NetworkCredentials, error) {
 // DeleteNetwork delete the network specified in parameter
 func DeleteNetwork(networkName string) error {
 
-	var i int
-	var ndb Ndb
-	var found bool
-
 	// Read the configuration file
 	byteValue, err := ioutil.ReadFile(GetNdbPath())
 	if err != nil {
 		return fmt.Errorf("DeleteNetwork: failed to read the configuration file: %v", err)
 	}
 
+	var ndb Ndb
 	err = json.Unmarshal(byteValue, &ndb)
 	if err != nil {
 		return fmt.Errorf("DeleteNetwork: failed to unmarshal the network configuration: %v", err)
 	}
 
 	// Find the network to delete
-	for i = 0; i < len(ndb.Networks); i++ {
+	var found bool
+	for i := 0; i < len(ndb.Networks); i++ {
 		if ndb.Networks[i].Name == networkName {
 			ndb.Networks = append(ndb.Networks[:i], ndb.Networks[i+1:]...)
 			found = true
@@ -131,7 +135,7 @@ func DeleteNetwork(networkName string) error {
 		}
 	}
 
-	if found == false {
+	if !found {
 		return fmt.Errorf("DeleteNetwork: failed to delete network: `%v`: not found", networkName)
 	}
 
@@ -140,6 +144,7 @@ func DeleteNetwork(networkName string) error {
 		return fmt.Errorf("DeleteNetwork: failed to marshal the network configuration: %v", err)
 	}
 
+	// FIXME: determine what permissions are necessary and add single var or constant in package
 	err = ioutil.WriteFile(GetNdbPath(), marshaledJSON, 0644)
 	if err != nil {
 		return fmt.Errorf("DeleteNetwork: failed to save the network configuration: %v", err)
@@ -151,14 +156,11 @@ func DeleteNetwork(networkName string) error {
 // ProvisionNetwork provision a new network based on the provisioned linked
 func ProvisionNetwork(provLink string, networkName string) error {
 
-	var netConf Ndb
-	var networkCred NetworkCredentials
-	var provInfo provInformation
 	var marshaledJSON []byte
 
 	cred, _ := GetNetworkCred(networkName)
 	if cred == nil {
-		return fmt.Errorf("ProvisionNetwork: the network name already exist: %s\n", networkName)
+		return fmt.Errorf("ProvisionNetwork: the network name already exist: %s", networkName)
 	}
 
 	Ldebug.Printf("provLink: %s\n", provLink)
@@ -166,23 +168,25 @@ func ProvisionNetwork(provLink string, networkName string) error {
 	// Parse the provisioning link
 	u, err := url.Parse(provLink)
 	if err != nil {
-		return fmt.Errorf("ProvisionNetwork: failed to parse the provisioning link: %v\n", err)
+		return fmt.Errorf("ProvisionNetwork: failed to parse the provisioning link: %v", err)
 	}
 
 	Ldebug.Printf("Parsed provisioning link: %v\n", u.RawQuery)
 
 	values, err := url.ParseQuery(u.RawQuery)
 	if err != nil {
-		return fmt.Errorf("ProvisionNetwork: failed to parse the query string: %v\n", err)
+		return fmt.Errorf("ProvisionNetwork: failed to parse the query string: %v", err)
 	}
 
 	// Extract the fields from the provisioning link
 	// FIXME create a function that validate and return a provInfo
-	provInfo.Version = values.Get("v")
-	provInfo.APIsrv = values.Get("a")
-	provInfo.NetworkUID = values.Get("w")
-	provInfo.NodeUID = values.Get("n")
-	provInfo.Key = values.Get("k")
+	provInfo := provInformation{
+		Version:    values.Get("v"),
+		APIsrv:     values.Get("a"),
+		NetworkUID: values.Get("w"),
+		NodeUID:    values.Get("n"),
+		Key:        values.Get("k"),
+	}
 
 	if provInfo.Version == "" {
 		return fmt.Errorf("ProvisionNetwork: failed to find the version from the provisioning link")
@@ -201,6 +205,7 @@ func ProvisionNetwork(provLink string, networkName string) error {
 	}
 
 	// Read the configuration into netConf
+	var netConf Ndb
 	data, err := ioutil.ReadFile(GetNdbPath())
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -209,22 +214,23 @@ func ProvisionNetwork(provLink string, networkName string) error {
 			// be written to a new file
 			netConf.Version = 1
 		} else {
-			return fmt.Errorf("ProvisionNetwork: failed to read the configuration file: %v\n", err)
+			return fmt.Errorf("ProvisionNetwork: failed to read the configuration file: %v", err)
 		}
 	} else {
 		err = json.Unmarshal(data, &netConf)
 		if err != nil {
-			return fmt.Errorf("ProvisionNetwork: failed to unmarshal the network configuration: %v\n", err)
+			return fmt.Errorf("ProvisionNetwork: failed to unmarshal the network configuration: %v", err)
 		}
 	}
 
 	// Generate a new public/private key pair
 	privKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
-		return fmt.Errorf("ProvisionNetwork: failed to generate new key pair: %v\n", err)
+		return fmt.Errorf("ProvisionNetwork: failed to generate new key pair: %v", err)
 	}
 
 	// Prepare a Certificate Signing Request
+	// FIXME: make this a package wide constant
 	name := pkix.Name{
 		CommonName: "netvfy-agent",
 	}
@@ -236,7 +242,7 @@ func ProvisionNetwork(provLink string, networkName string) error {
 
 	csrCertificate, err := x509.CreateCertificateRequest(rand.Reader, &csrTemplate, privKey)
 	if err != nil {
-		return fmt.Errorf("ProvisionNetwork: failed to generate the Certificate Signing Request: %v\n", err)
+		return fmt.Errorf("ProvisionNetwork: failed to generate the Certificate Signing Request: %v", err)
 	}
 
 	csr := pem.EncodeToMemory(&pem.Block{
@@ -253,7 +259,7 @@ func ProvisionNetwork(provLink string, networkName string) error {
 
 	jreq, err := json.Marshal(req)
 	if err != nil {
-		return fmt.Errorf("ProvisionNetwork: failed to marshal the Certificate Signing Request request: %v\n", err)
+		return fmt.Errorf("ProvisionNetwork: failed to marshal the Certificate Signing Request request: %v", err)
 	}
 
 	Ldebug.Printf("CSR request: %s\n", jreq)
@@ -263,25 +269,26 @@ func ProvisionNetwork(provLink string, networkName string) error {
 	}
 	request, err := http.NewRequest("POST", "https://"+provInfo.APIsrv+"/v1/provisioning", bytes.NewBuffer(jreq))
 	if err != nil {
-		return fmt.Errorf("ProvisionNetwork: failed to create the http new request: %v\n", err)
+		return fmt.Errorf("ProvisionNetwork: failed to create the http new request: %v", err)
 	}
 	request.Header.Set("Content-Type", "application/json")
 
 	resp, err := client.Do(request)
 	if err != nil {
-		return fmt.Errorf("ProvisionNetwork: failed to perform the http request: %v\n", err)
+		return fmt.Errorf("ProvisionNetwork: failed to perform the http request: %v", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		return fmt.Errorf("ProvisionNetwork: failed to read the query response: %v\n", err)
+		return fmt.Errorf("ProvisionNetwork: failed to read the query response: %v", err)
 	}
 
 	// Unmarshal the CSR response
+	var networkCred NetworkCredentials
 	err = json.Unmarshal(body, &networkCred)
 	if err != nil {
-		return fmt.Errorf("ProvisionNetwork: failed to unmarshal the provisioning response: %v\n", err)
+		return fmt.Errorf("ProvisionNetwork: failed to unmarshal the provisioning response: %v", err)
 	}
 
 	// If no network name was provided, ask for one
@@ -292,7 +299,7 @@ func ProvisionNetwork(provLink string, networkName string) error {
 		// ReadString will block until the delimiter is entered
 		networkCred.Name, err = reader.ReadString('\n')
 		if err != nil {
-			return fmt.Errorf("ProvisionNetwork: failed to read the entered network name: %v\n", err)
+			return fmt.Errorf("ProvisionNetwork: failed to read the entered network name: %v", err)
 		}
 		networkCred.Name = strings.TrimRight(networkCred.Name, "\r\n")
 	}
@@ -311,13 +318,14 @@ func ProvisionNetwork(provLink string, networkName string) error {
 
 	marshaledJSON, err = json.MarshalIndent(netConf, "", " ")
 	if err != nil {
-		return fmt.Errorf("ProvisionNetwork: failed to marshal the network configuration: %v\n", err)
+		return fmt.Errorf("ProvisionNetwork: failed to marshal the network configuration: %v", err)
 	}
 
 	os.MkdirAll(filepath.Dir(GetNdbPath()), os.ModePerm)
+	// FIXME: determine what permissions are necessary and add single var or constant in package
 	err = ioutil.WriteFile(GetNdbPath(), marshaledJSON, 0644)
 	if err != nil {
-		return fmt.Errorf("ProvisionNetwork: failed to save the network configuration: %v\n", err)
+		return fmt.Errorf("ProvisionNetwork: failed to save the network configuration: %v", err)
 	}
 
 	return nil
