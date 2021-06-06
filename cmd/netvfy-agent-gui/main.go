@@ -1,8 +1,13 @@
 package main
 
 import (
+	"fmt"
+	"io/ioutil"
+	"log"
+	"os"
 	"os/exec"
 	"runtime"
+	"strings"
 
 	agent "github.com/netvfy/go-netvfy-agent"
 
@@ -10,6 +15,9 @@ import (
 	"github.com/progrium/macdriver/core"
 	"github.com/progrium/macdriver/objc"
 )
+
+var connectItemArray []cocoa.NSMenuItem
+var deleteItemArray []cocoa.NSMenuItem
 
 func listNetworks(message *chan string, menuConnectNetwork *cocoa.NSMenu, menuDeleteNetwork *cocoa.NSMenu) {
 	var i int
@@ -19,6 +27,18 @@ func listNetworks(message *chan string, menuConnectNetwork *cocoa.NSMenu, menuDe
 	if err != nil {
 		return
 	}
+
+	for _, item := range connectItemArray {
+		menuConnectNetwork.RemoveItem(item)
+		item.Release()
+	}
+	connectItemArray = nil
+
+	for _, item := range deleteItemArray {
+		menuDeleteNetwork.RemoveItem(item)
+		item.Release()
+	}
+	deleteItemArray = nil
 
 	for i = 0; i < len(ndb.Networks); i++ {
 
@@ -30,6 +50,7 @@ func listNetworks(message *chan string, menuConnectNetwork *cocoa.NSMenu, menuDe
 			// TODO connect to selected network
 		})
 		menuConnectNetwork.AddItem(item)
+		connectItemArray = append(connectItemArray, item)
 
 		item2 := cocoa.NSMenuItem_New()
 		item2.SetTitle(ndb.Networks[i].Name)
@@ -44,10 +65,31 @@ func listNetworks(message *chan string, menuConnectNetwork *cocoa.NSMenu, menuDe
 			item.Release()
 		})
 		menuDeleteNetwork.AddItem(item2)
+		deleteItemArray = append(deleteItemArray, item2)
 	}
 }
 
+// InputBox displays a dialog box, returning the entered value and a bool for success
+func InputBox(title, message, defaultAnswer string) (string, bool) {
+	out, err := exec.Command(
+		"osascript",
+		"-e",
+		`set T to text returned of (display dialog "`+
+			message+`" buttons {"Cancel", "OK"} default button "OK" with title "`+title+`" default answer "`+
+			defaultAnswer+`")`).Output()
+	if err != nil {
+		return "", false
+	}
+	return strings.TrimSpace(string(out)), true
+}
+
 func main() {
+
+	// FIXME: log at the right place
+	agent.Ldebug = log.New(os.Stdout, "debug: ", log.Ldate|log.Ltime|log.Lshortfile)
+	agent.Linfo = log.New(ioutil.Discard, "", 0)
+	agent.Lerror = log.New(os.Stdout, "error: ", log.Ldate|log.Ltime|log.Lshortfile)
+
 	runtime.LockOSThread()
 
 	messages := make(chan string)
@@ -82,17 +124,27 @@ func main() {
 
 		menu.AddItem(cocoa.NSMenuItem_Separator())
 
+		itemDeleteMenu := cocoa.NSMenu_New()
+
 		// Add Network
 		itemAddNetwork := cocoa.NSMenuItem_New()
 		itemAddNetwork.SetTitle("Add a new network")
 		itemAddNetwork.SetEnabled(true)
+		itemAddNetwork.SetAction(objc.Sel("addNetwork:"))
+		cocoa.DefaultDelegateClass.AddMethod("addNetwork:", func(_ objc.Object) {
+			provKey, ok := InputBox("Provisioning key", "Please copy the provisioning key here:", "")
+			fmt.Printf("-> %s :: %v\n", provKey, ok)
+			label, ok := InputBox("Provisioning key", "Specify a name for this network connection:", "")
+			fmt.Printf("-> %s :: %v\n", label, ok)
+			fmt.Printf("error: %s\n", agent.ProvisionNetwork(provKey, label))
+			listNetworks(&messages, &itemConnectMenu, &itemDeleteMenu)
+		})
 		menu.AddItem(itemAddNetwork)
 
 		// Delete menu
 		itemDelete := cocoa.NSMenuItem_New()
 		itemDelete.SetTitle("Delete a network")
 		menu.AddItem(itemDelete)
-		itemDeleteMenu := cocoa.NSMenu_New()
 		itemDeleteMenu.SetAutoenablesItems(false)
 		itemDelete.SetSubmenu(itemDeleteMenu)
 
