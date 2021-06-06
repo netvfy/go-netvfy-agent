@@ -231,10 +231,6 @@ func connController(ctx context.Context, cancel context.CancelFunc, ctrlInfo *co
 			// ticker detected a disconnect form the controller
 			return
 		default:
-			// FIXME: the linter is indicating this is an ineffective break - should this just be a continue?
-			// A break statement terminates execution of the innermost for, switch, or select statement - ergo this is useless
-			// Source: https://yourbasic.org/golang/switch-statement/
-			break
 		}
 
 		err = json.NewDecoder(conn).Decode(&switchInfo)
@@ -265,7 +261,7 @@ func connController(ctx context.Context, cancel context.CancelFunc, ctrlInfo *co
 			agent.Ldebug.Printf("%s\n", cmd.String())
 			stderr, err := cmd.StderrPipe()
 			if err != nil {
-				elog.Fatalf("failed to initialize ifconfig command: %v", err)
+				agent.Lerror.Fatalf("failed to initialize ifconfig command: %v", err)
 			}
 			err = cmd.Start()
 			if err != nil {
@@ -288,7 +284,7 @@ func connController(ctx context.Context, cancel context.CancelFunc, ctrlInfo *co
 			agent.Ldebug.Printf("%v\n", cmd.String())
 			stderr, err = cmd.StderrPipe()
 			if err != nil {
-				elog.Fatalf("failed to initialize error pipe: %v", err)
+				agent.Lerror.Fatalf("failed to initialize error pipe: %v", err)
 			}
 			err = cmd.Start()
 			if err != nil {
@@ -409,8 +405,6 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 			// ticker detected a disconnect form the controller
 			return
 		default:
-			// FIXME: the linter is indicating this is an ineffective break
-			break
 		}
 
 		if offset == 0 {
@@ -460,9 +454,7 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 
 		switch nvType {
 		case 0:
-			// We just received a keep alive from the server
-			// FIXME: the linter is indicating this is an ineffective break
-			break
+			// We just received a keep alive from the server, do nothing
 		case 1:
 			// We just received an ethernet frame from the server
 			agent.Ldebug.Printf("length: %d -- type: %d\n", length, nvType)
@@ -583,7 +575,7 @@ func connectNetwork(networkName string) {
 	// Parse the Certificate and Private key to form the tls Certificate
 	tlsCert, err := tls.X509KeyPair([]byte(networkCred.Cert), []byte(networkCred.PVkey))
 	if err != nil {
-		elog.Fatalf("unable to parse certs: %v", err)
+		agent.Lerror.Fatalf("unable to parse certs: %v", err)
 	}
 
 	// Parse the certificate PEM to create an x509 certificate object
