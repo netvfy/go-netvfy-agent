@@ -231,7 +231,6 @@ func connController(ctx context.Context, cancel context.CancelFunc, ctrlInfo *co
 			// ticker detected a disconnect form the controller
 			return
 		default:
-			break
 		}
 
 		err = json.NewDecoder(conn).Decode(&switchInfo)
@@ -261,6 +260,9 @@ func connController(ctx context.Context, cancel context.CancelFunc, ctrlInfo *co
 			cmd := exec.Command("ifconfig", utunName, gSwitch.info.IPaddr, gSwitch.info.IPaddr, "netmask", gSwitch.info.Netmask)
 			agent.Ldebug.Printf("%s\n", cmd.String())
 			stderr, err := cmd.StderrPipe()
+			if err != nil {
+				agent.Lerror.Fatalf("failed to initialize ifconfig command: %v", err)
+			}
 			err = cmd.Start()
 			if err != nil {
 				agent.Lerror.Fatalf("failed to apply ifconfig on %v: %v\n", utunName, err)
@@ -281,6 +283,9 @@ func connController(ctx context.Context, cancel context.CancelFunc, ctrlInfo *co
 			cmd = exec.Command("route", "add", "-net", subnet.String(), gSwitch.info.IPaddr, gSwitch.info.Netmask)
 			agent.Ldebug.Printf("%v\n", cmd.String())
 			stderr, err = cmd.StderrPipe()
+			if err != nil {
+				agent.Lerror.Fatalf("failed to initialize error pipe: %v", err)
+			}
 			err = cmd.Start()
 			if err != nil {
 				agent.Lerror.Fatalf("failed to add new route on %v: %v", utunName, err)
@@ -400,7 +405,6 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 			// ticker detected a disconnect form the controller
 			return
 		default:
-			break
 		}
 
 		if offset == 0 {
@@ -450,8 +454,7 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 
 		switch nvType {
 		case 0:
-			// We just received a keep alive from the server
-			break
+			// We just received a keep alive from the server, do nothing
 		case 1:
 			// We just received an ethernet frame from the server
 			agent.Ldebug.Printf("length: %d -- type: %d\n", length, nvType)
@@ -571,6 +574,9 @@ func connectNetwork(networkName string) {
 
 	// Parse the Certificate and Private key to form the tls Certificate
 	tlsCert, err := tls.X509KeyPair([]byte(networkCred.Cert), []byte(networkCred.PVkey))
+	if err != nil {
+		agent.Lerror.Fatalf("unable to parse certs: %v", err)
+	}
 
 	// Parse the certificate PEM to create an x509 certificate object
 	// that will allow us to extract the Subject field
@@ -712,12 +718,12 @@ func main() {
 	flag.Parse()
 
 	// Enable debug log level
-	var LdebugOut io.Writer = ioutil.Discard
-	if *verbose == true {
-		LdebugOut = os.Stdout
+	var dlogOut io.Writer = ioutil.Discard
+	if *verbose {
+		dlogOut = os.Stdout
 	}
 
-	agent.Ldebug = log.New(LdebugOut, "debug: ", log.Ldate|log.Ltime|log.Lshortfile)
+	agent.Ldebug = log.New(dlogOut, "debug: ", log.Ldate|log.Ltime|log.Lshortfile)
 	agent.Linfo = log.New(os.Stdout, "", 0)
 	agent.Lerror = log.New(os.Stdout, "error: ", log.Ldate|log.Ltime|log.Lshortfile)
 
@@ -735,7 +741,7 @@ func main() {
 			agent.Lerror.Fatal(err)
 		}
 		return
-	} else if *list == true {
+	} else if *list {
 		listNetworks()
 	} else if *connect != "" {
 
