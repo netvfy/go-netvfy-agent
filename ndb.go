@@ -159,7 +159,7 @@ func ProvisionNetwork(provLink string, networkName string) error {
 	var marshaledJSON []byte
 
 	cred, _ := GetNetworkCred(networkName)
-	if cred == nil {
+	if cred != nil {
 		return fmt.Errorf("ProvisionNetwork: the network name already exist: %s", networkName)
 	}
 
