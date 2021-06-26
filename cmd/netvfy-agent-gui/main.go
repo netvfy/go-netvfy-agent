@@ -47,6 +47,7 @@ func listNetworks(message *chan string, menuConnectNetwork *cocoa.NSMenu, menuDe
 		item.SetEnabled(true)
 		item.SetAction(objc.Sel("add," + ndb.Networks[i].Name + ":"))
 		cocoa.DefaultDelegateClass.AddMethod("add,"+ndb.Networks[i].Name+":", func(o objc.Object) {
+			go agent.ConnectNetwork(item.Title())
 			// TODO connect to selected network
 		})
 		menuConnectNetwork.AddItem(item)
@@ -91,6 +92,9 @@ func main() {
 	agent.Lerror = log.New(os.Stdout, "error: ", log.Ldate|log.Ltime|log.Lshortfile)
 
 	runtime.LockOSThread()
+
+	agent.InitNetwork()
+	go agent.ReadUTUN()
 
 	messages := make(chan string)
 
