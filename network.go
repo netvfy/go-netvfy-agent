@@ -135,7 +135,7 @@ func ReadUTUN() {
 			continue
 		}
 
-		// nvHeader lenght value
+		// nvHeader length value
 		binary.BigEndian.PutUint16(frameBuf[0:2], uint16(2+14+n))
 		// nvHeader type frame
 		binary.BigEndian.PutUint16(frameBuf[2:4], 1)
