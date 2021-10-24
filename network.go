@@ -224,6 +224,8 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 	Ldebug.Printf("vswich: handshake: %v\n", state.HandshakeComplete)
 	Ldebug.Printf("vswitch: client: mutual: %v\n", state.NegotiatedProtocolIsMutual)
 
+	// TODO(nick): Send GARP to switch
+
 	// Prepare the keep alive ticker
 	nvhdr = &nvHdr{
 		Length: 2,
@@ -371,6 +373,7 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 				} else if oper == OperationRequest {
 					Ldebug.Printf("Received ARP request\n")
 					// We received an ARP request, send a response
+					// TODO(sneha): Check if GARP and update table if needed
 					sendBuf := GenerateARPReply(gMAC[0:6], sha, tpa, spa)
 
 					b, err := vswitchConn.Write(sendBuf)
