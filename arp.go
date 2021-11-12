@@ -211,9 +211,11 @@ func (q *ARPQueue) IterateAndRun(ip string, fn func([]byte) error) {
 func GenerateARPRequest(arpTable *ArpTable, srcMAC []byte, dstIP string, srcIP string) ([]byte, error) {
 
 	// FIXME this function should be .Upsert() (Add or Update the entry)
-	err := arpTable.Add(dstIP)
-	if err != nil {
-		return nil, fmt.Errorf("unable to add waiting ARP entry: %v", err)
+	if arpTable != nil {
+		err := arpTable.Add(dstIP)
+		if err != nil {
+			return nil, fmt.Errorf("unable to add waiting ARP entry: %v", err)
+		}
 	}
 
 	// Make space for nv header + ethernet header + ARP request

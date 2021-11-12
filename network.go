@@ -122,7 +122,7 @@ func getOutboundIP() string {
 }
 
 func ReadUTUN() {
-
+	//[ nvheader (4) | (14) ETHERNET_STUFF | IP PACKET (...)]
 	frameBuf := make([]byte, 2000)
 	for {
 		n, err := utun.Read(frameBuf[4+14:])
@@ -167,7 +167,7 @@ func ReadUTUN() {
 
 			// TODO: Queue ethernet frame while ARP is being resolving the dst MAC address
 
-			Ldebug.Printf("Sending an ARP request !\n")
+			//		Ldebug.Printf("Sending an ARP request !\n")
 			sendBuf, err := GenerateARPRequest(arpTable, gMAC, dstIP.String(), gSwitch.info.IPaddr)
 			if err != nil {
 				Lerror.Printf("unable to generate ARP request: %v", err)
@@ -231,6 +231,36 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 	}
 
 	binary.Write(&keepaliveBuf, binary.BigEndian, nvhdr)
+
+	// Generate the Ethernet header
+	garpBuf := make([]byte, 2000)
+	// nvHeader length value
+	binary.BigEndian.PutUint16(garpBuf[0:2], uint16(2+14+n))
+	// nvHeader type frame
+	binary.BigEndian.PutUint16(garpBuf[2:4], 1)
+	// src MAC address
+	copy(frameBuf[10:16], gMAC[0:6])
+	// DST MAC address
+	copy(frameBuf[4:10], entry.Mac)
+	// EtherType IP
+	binary.BigEndian.PutUint16(frameBuf[16:18], TypeARP)
+
+	// Generate and send gratutious ARP here
+	srcMAC, err := net.ParseMAC("11:11:11:11:11:11")
+	if err != nil {
+		Lerror.Printf("failed parsing mac address: %v", err)
+	}
+
+	srcIP := net.ParseIP("10.0.0.1")
+	dstIP := net.ParseIP("10.0.0.1")
+
+	garp, err := GenerateARPRequest(nil, srcMAC, dstIP.String(), srcIP.String())
+	if err != nil {
+		Lerror.Printf("failed to generate ARP request: %v", err)
+	}
+
+	copy(garpBuf[4+14:], garp)
+	vswitchConn.Write(garpBuf)
 
 	// Every second we send a keep alive to the vswitch
 	ticker = time.NewTicker(1 * time.Second)
