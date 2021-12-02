@@ -232,27 +232,26 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 
 	binary.Write(&keepaliveBuf, binary.BigEndian, nvhdr)
 
-	// Generate the Ethernet header
-	garpBuf := make([]byte, 2000)
+	// Generate the Ethernet header --------------------
+	garpBuf := make([]byte, 2+14+28)
 	// nvHeader length value
-	binary.BigEndian.PutUint16(garpBuf[0:2], uint16(2+14+n))
+	binary.BigEndian.PutUint16(garpBuf[0:2], uint16(2+14+28))
 	// nvHeader type frame
 	binary.BigEndian.PutUint16(garpBuf[2:4], 1)
 	// src MAC address
 	copy(frameBuf[10:16], gMAC[0:6])
 	// DST MAC address
-	copy(frameBuf[4:10], entry.Mac)
+
+	bcastmac := []byte{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}
+	copy(frameBuf[4:10], bcastmac)
 	// EtherType IP
 	binary.BigEndian.PutUint16(frameBuf[16:18], TypeARP)
 
 	// Generate and send gratutious ARP here
-	srcMAC, err := net.ParseMAC("11:11:11:11:11:11")
-	if err != nil {
-		Lerror.Printf("failed parsing mac address: %v", err)
-	}
+	srcMAC := net.HardwareAddr(gMAC)
 
-	srcIP := net.ParseIP("10.0.0.1")
-	dstIP := net.ParseIP("10.0.0.1")
+	srcIP := net.ParseIP(gSwitch.info.IPaddr)
+	dstIP := net.ParseIP(gSwitch.info.IPaddr)
 
 	garp, err := GenerateARPRequest(nil, srcMAC, dstIP.String(), srcIP.String())
 	if err != nil {
@@ -261,6 +260,8 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 
 	copy(garpBuf[4+14:], garp)
 	vswitchConn.Write(garpBuf)
+
+	///---------------------------------------------------
 
 	// Every second we send a keep alive to the vswitch
 	ticker = time.NewTicker(1 * time.Second)
