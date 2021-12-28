@@ -232,35 +232,15 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 
 	binary.Write(&keepaliveBuf, binary.BigEndian, nvhdr)
 
-	// Generate the Ethernet header --------------------
-	garpBuf := make([]byte, 2+14+28)
-	// nvHeader length value
-	binary.BigEndian.PutUint16(garpBuf[0:2], uint16(2+14+28))
-	// nvHeader type frame
-	binary.BigEndian.PutUint16(garpBuf[2:4], 1)
-	// src MAC address
-	copy(frameBuf[10:16], gMAC[0:6])
-	// DST MAC address
-
-	bcastmac := []byte{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}
-	copy(frameBuf[4:10], bcastmac)
-	// EtherType IP
-	binary.BigEndian.PutUint16(frameBuf[16:18], TypeARP)
-
 	// Generate and send gratutious ARP here
 	srcMAC := net.HardwareAddr(gMAC)
-
 	srcIP := net.ParseIP(gSwitch.info.IPaddr)
 	dstIP := net.ParseIP(gSwitch.info.IPaddr)
-
 	garp, err := GenerateARPRequest(nil, srcMAC, dstIP.String(), srcIP.String())
 	if err != nil {
 		Lerror.Printf("failed to generate ARP request: %v", err)
 	}
-
-	copy(garpBuf[4+14:], garp)
-	vswitchConn.Write(garpBuf)
-
+	vswitchConn.Write(garp)
 	///---------------------------------------------------
 
 	// Every second we send a keep alive to the vswitch
@@ -391,6 +371,13 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 				Ldebug.Printf("ARP SPA: %s\n", spa.String())
 				Ldebug.Printf("ARP THA: %s\n", tha)
 				Ldebug.Printf("ARP TPA: %s\n", tpa.String())
+
+				// check if it's a valid Gratuitous ARP
+				if bytes.Equal(frameBuf[10:16], frameBuf[26:32]) { // ETH src MAC match the arp SHA
+					if bytes.Equal(frameBuf[32:35], frameBuf[42:45]) { // arp SPA match TPA
+						Ldebug.Printf("we received an GARP")
+					}
+				}
 
 				if oper == OperationReply {
 					Ldebug.Printf("Received ARP response\n")
