@@ -376,6 +376,7 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 				if bytes.Equal(frameBuf[10:16], frameBuf[26:32]) { // ETH src MAC match the arp SHA
 					if bytes.Equal(frameBuf[32:35], frameBuf[42:45]) { // arp SPA match TPA
 						Ldebug.Printf("we received an GARP")
+						// TODO : update the ARP table here
 					}
 				}
 
