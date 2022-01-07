@@ -122,7 +122,6 @@ func getOutboundIP() string {
 }
 
 func ReadUTUN() {
-	//[ nvheader (4) | (14) ETHERNET_STUFF | IP PACKET (...)]
 	frameBuf := make([]byte, 2000)
 	for {
 		n, err := utun.Read(frameBuf[4+14:])
@@ -167,7 +166,6 @@ func ReadUTUN() {
 
 			// TODO: Queue ethernet frame while ARP is being resolving the dst MAC address
 
-			//		Ldebug.Printf("Sending an ARP request !\n")
 			sendBuf, err := GenerateARPRequest(arpTable, gMAC, dstIP.String(), gSwitch.info.IPaddr)
 			if err != nil {
 				Lerror.Printf("unable to generate ARP request: %v", err)
@@ -239,9 +237,9 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 	garp, err := GenerateARPRequest(nil, srcMAC, dstIP.String(), srcIP.String())
 	if err != nil {
 		Lerror.Printf("failed to generate ARP request: %v", err)
+	} else {
+		vswitchConn.Write(garp)
 	}
-	vswitchConn.Write(garp)
-	///---------------------------------------------------
 
 	// Every second we send a keep alive to the vswitch
 	ticker = time.NewTicker(1 * time.Second)
