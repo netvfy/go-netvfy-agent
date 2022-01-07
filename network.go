@@ -372,14 +372,6 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 				Ldebug.Printf("ARP THA: %s\n", tha)
 				Ldebug.Printf("ARP TPA: %s\n", tpa.String())
 
-				// check if it's a valid Gratuitous ARP
-				if bytes.Equal(frameBuf[10:16], frameBuf[26:32]) { // ETH src MAC match the arp SHA
-					if bytes.Equal(frameBuf[32:35], frameBuf[42:45]) { // arp SPA match TPA
-						Ldebug.Printf("we received an GARP")
-						// TODO : update the ARP table here
-					}
-				}
-
 				if oper == OperationReply {
 					Ldebug.Printf("Received ARP response\n")
 					// We received an ARP response
@@ -389,14 +381,23 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 					}
 				} else if oper == OperationRequest {
 					Ldebug.Printf("Received ARP request\n")
-					// We received an ARP request, send a response
-					sendBuf := GenerateARPReply(gMAC[0:6], sha, tpa, spa)
 
-					b, err := vswitchConn.Write(sendBuf)
-					if err != nil {
-						Lerror.Printf("failed to write frame to %s\n", utunName)
+					// check if it's a valid Gratuitous ARP
+					if bytes.Equal(frameBuf[10:16], frameBuf[26:32]) { // ETH src MAC match the arp SHA
+						if bytes.Equal(frameBuf[32:35], frameBuf[42:45]) { // arp SPA match TPA
+							Ldebug.Printf("we received an GARP")
+							arpTable.Update(spa.String(), sha)
+						}
+					} else {
+						// We received an ARP request, send a response
+						sendBuf := GenerateARPReply(gMAC[0:6], sha, tpa, spa)
+
+						b, err := vswitchConn.Write(sendBuf)
+						if err != nil {
+							Lerror.Printf("failed to write frame to %s\n", utunName)
+						}
+						Ldebug.Printf("wrote %d bytes to vswitch\n", b)
 					}
-					Ldebug.Printf("wrote %d bytes to vswitch\n", b)
 				}
 			} else {
 				// IP  -> 0x0800
