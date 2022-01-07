@@ -122,6 +122,7 @@ func getOutboundIP() string {
 }
 
 func ReadUTUN() {
+
 	frameBuf := make([]byte, 2000)
 	for {
 		n, err := utun.Read(frameBuf[4+14:])
