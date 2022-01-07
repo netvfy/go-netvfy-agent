@@ -167,7 +167,6 @@ func ReadUTUN() {
 
 			// TODO: Queue ethernet frame while ARP is being resolving the dst MAC address
 
-			Ldebug.Printf("Sending an ARP request !\n")
 			sendBuf, err := GenerateARPRequest(arpTable, gMAC, dstIP.String(), gSwitch.info.IPaddr)
 			if err != nil {
 				Lerror.Printf("unable to generate ARP request: %v", err)
@@ -231,6 +230,17 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 	}
 
 	binary.Write(&keepaliveBuf, binary.BigEndian, nvhdr)
+
+	// Generate and send gratutious ARP here
+	srcMAC := net.HardwareAddr(gMAC)
+	srcIP := net.ParseIP(gSwitch.info.IPaddr)
+	dstIP := net.ParseIP(gSwitch.info.IPaddr)
+	garp, err := GenerateARPRequest(nil, srcMAC, dstIP.String(), srcIP.String())
+	if err != nil {
+		Lerror.Printf("failed to generate ARP request: %v", err)
+	} else {
+		vswitchConn.Write(garp)
+	}
 
 	// Every second we send a keep alive to the vswitch
 	ticker = time.NewTicker(1 * time.Second)
@@ -370,14 +380,23 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 					}
 				} else if oper == OperationRequest {
 					Ldebug.Printf("Received ARP request\n")
-					// We received an ARP request, send a response
-					sendBuf := GenerateARPReply(gMAC[0:6], sha, tpa, spa)
 
-					b, err := vswitchConn.Write(sendBuf)
-					if err != nil {
-						Lerror.Printf("failed to write frame to %s\n", utunName)
+					// check if it's a valid Gratuitous ARP
+					if bytes.Equal(frameBuf[10:16], frameBuf[26:32]) { // ETH src MAC match the arp SHA
+						if bytes.Equal(frameBuf[32:35], frameBuf[42:45]) { // arp SPA match TPA
+							Ldebug.Printf("we received an GARP")
+							arpTable.Update(spa.String(), sha)
+						}
+					} else {
+						// We received an ARP request, send a response
+						sendBuf := GenerateARPReply(gMAC[0:6], sha, tpa, spa)
+
+						b, err := vswitchConn.Write(sendBuf)
+						if err != nil {
+							Lerror.Printf("failed to write frame to %s\n", utunName)
+						}
+						Ldebug.Printf("wrote %d bytes to vswitch\n", b)
 					}
-					Ldebug.Printf("wrote %d bytes to vswitch\n", b)
 				}
 			} else {
 				// IP  -> 0x0800
