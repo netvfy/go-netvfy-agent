@@ -16,17 +16,18 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v2
       with:
-        go-version: 1.15
+        go-version: 1.17
 
-    - name: Vet and staticcheck
+    - name: Debug
       run: |
-        export PATH=${PATH}:`go env GOPATH`/bin
-        go get -u honnef.co/go/tools/cmd/staticcheck
-        go vet -v ./...
-        staticcheck ./...
+        pwd
+        echo ${HOME}
+        echo ${GITHUB_WORKSPACE}
+        echo ${GOPATH}
+        echo ${GOROOT}
 
     - name: Build
-      run: go build -v ./...
+      run: go build .
 
     - name: Test
-      run: go test -v ./...
+      run: go test -v .
