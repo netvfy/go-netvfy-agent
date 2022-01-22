@@ -82,13 +82,13 @@ var vswitchConn *tls.Conn
 
 var (
 	// arpQueue of waiting frames that is global to main.
-	arpQueue *ARPQueue
+	//arpQueue *ARPQueue
 	// arpTable is global to main.
 	arpTable *ArpTable
 )
 
 // queueMax is hard limit of arpQueue entries.
-const arpQueueMax = 50
+//const arpQueueMax = 50
 const utunName = "utun7"
 const randomInternetIP = "8.8.8.8:80"
 
@@ -219,9 +219,8 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 		Ldebug.Printf("vswitch: expiry: %s \n", cert.NotAfter.Format("2006-January-02"))
 		Ldebug.Printf("vswitch: common Name: %s \n", cert.Issuer.CommonName)
 	}
-	// Pint the state of the connection
+	// Print the state of the connection
 	Ldebug.Printf("vswich: handshake: %v\n", state.HandshakeComplete)
-	Ldebug.Printf("vswitch: client: mutual: %v\n", state.NegotiatedProtocolIsMutual)
 
 	// Prepare the keep alive ticker
 	nvhdr = &nvHdr{
@@ -438,7 +437,6 @@ func connController(ctx context.Context, cancel context.CancelFunc, ctrlInfo *co
 	}
 	// Print the state of the connection
 	Ldebug.Printf("controller: handshake: %v\n", state.HandshakeComplete)
-	Ldebug.Printf("controller: mutual: %v\n", state.NegotiatedProtocolIsMutual)
 
 	// Create a node info object with our information
 	outboundIP := getOutboundIP()
@@ -766,7 +764,7 @@ func ConnectNetwork(networkName string) {
 func InitNetwork() {
 
 	// Setup ARP structs.
-	arpQueue = NewARPQueue(arpQueueMax)
+	//arpQueue = NewARPQueue(arpQueueMax)
 	arpTable = &ArpTable{}
 
 	gMAC = genMAC()
