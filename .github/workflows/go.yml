@@ -26,6 +26,12 @@ jobs:
         echo ${GOPATH}
         echo ${GOROOT}
 
+    - name: staticcheck
+      run: |
+        export PATH=${PATH}:`go env GOPATH`/bin
+        go get -u honnef.co/go/tools/cmd/staticcheck
+        staticcheck ./...
+
     - name: vet
       run: go vet -v .
 
