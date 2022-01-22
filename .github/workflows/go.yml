@@ -1,0 +1,42 @@
+name: Go
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Set up Go
+      uses: actions/setup-go@v2
+      with:
+        go-version: 1.17
+
+    - name: Debug
+      run: |
+        pwd
+        echo ${HOME}
+        echo ${GITHUB_WORKSPACE}
+        echo ${GOPATH}
+        echo ${GOROOT}
+
+    - name: staticcheck
+      run: |
+        export PATH=${PATH}:`go env GOPATH`/bin
+        go install honnef.co/go/tools/cmd/staticcheck@latest
+        staticcheck ./...
+
+    - name: vet
+      run: go vet -v .
+
+    - name: Build
+      run: go build .
+
+    - name: Test
+      run: go test -v .
