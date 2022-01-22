@@ -30,7 +30,7 @@ jobs:
       run: |
         export PATH=${PATH}:`go env GOPATH`/bin
         go install honnef.co/go/tools/cmd/staticcheck@latest
-        staticcheck ./...
+        staticcheck .
 
     - name: vet
       run: go vet -v .
