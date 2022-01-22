@@ -26,6 +26,9 @@ jobs:
         echo ${GOPATH}
         echo ${GOROOT}
 
+    - name: vet
+      run: go vet -v .
+
     - name: Build
       run: go build .
 
