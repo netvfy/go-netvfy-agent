@@ -31,6 +31,7 @@ const (
 // ArpTable is thread-safe ARP hashmap matching string IPv4 address to ArpEntries.
 type ArpTable struct {
 	ArpMap sync.Map
+	TTL    time.Duration
 }
 
 // ArpEntry contains IP to MAC addressing mapping determined via ARP protocol.
@@ -93,6 +94,34 @@ func (t *ArpTable) Get(IP string) (*ArpEntry, bool, error) {
 		return nil, false, errors.New("invalid ARP entry type")
 	}
 	return arpEntry, found, nil
+}
+
+// Purge removes arp entries beyond the TTL
+func (t *ArpTable) Purge() {
+	toPurge := []string{}
+	currentTime := time.Now()
+
+	// Iterating through map and adding expired ips to a purgelist.
+	// Note: Following this approach as load, delete functionality is threadsafe
+	// for sync maps but range does not offer a consistent snapshot of the map.
+	t.ArpMap.Range(func(key, value interface{}) bool {
+		k, ok := key.(string)
+		if !ok {
+			return false
+		}
+		entry, ok := value.(*ArpEntry)
+		if !ok {
+			return false
+		}
+		if currentTime.After(entry.Timestamp.Add(t.TTL)) {
+			toPurge = append(toPurge, k)
+		}
+		return true
+	})
+
+	for _, key := range toPurge {
+		t.ArpMap.Delete(key)
+	}
 }
 
 // Remove removes an ArpEntry in the ArpTable syncmap.

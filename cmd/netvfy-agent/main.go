@@ -61,6 +61,7 @@ func main() {
 		agent.InitNetwork()
 		go agent.ReadUTUN()
 
+		// TODO(sneha): use time ticker here instead of sleeping
 		for {
 			agent.ConnectNetwork(*connect)
 			time.Sleep(3 * time.Second)

@@ -230,7 +230,7 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 
 	binary.Write(&keepaliveBuf, binary.BigEndian, nvhdr)
 
-	// Generate and send gratutious ARP here
+	// Generate and send gratuitous ARP here
 	srcMAC := net.HardwareAddr(gMAC)
 	srcIP := net.ParseIP(gSwitch.info.IPaddr)
 	dstIP := net.ParseIP(gSwitch.info.IPaddr)
@@ -251,8 +251,8 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 				// the vswitch is done
 				Ldebug.Printf("vswitch connection closing, context is done\n")
 				return
-				// the ticker is done
 			case <-done:
+				// the ticker is done
 				Ldebug.Printf("vswitch connection closing, ticker is done\n")
 				return
 			case <-ticker.C:
@@ -261,9 +261,29 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 					Ldebug.Printf("got disconnected from the switch: %v\n", err)
 					// the agent got disconnected from the vswitch
 					ticker.Stop()
-					done <- true
+					// TODO(sneha): this should actually close the channel vs. sending a value given it's used in multiple areas
+					close(done)
 					return
 				}
+			}
+		}
+	}()
+
+	// Start arptable cleaning loop
+	cleanTicker := time.NewTicker(10 * time.Minute)
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				// the vswitch is done
+				Ldebug.Printf("vswitch connection closing, context is done\n")
+				return
+			case <-done:
+				// the ticker is done
+				Ldebug.Printf("vswitch connection closing, ticker is done\n")
+				return
+			case <-cleanTicker.C:
+
 			}
 		}
 	}()
