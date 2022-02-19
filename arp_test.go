@@ -139,6 +139,11 @@ func TestArpTable(t *testing.T) {
 
 }
 
+// TestArpTablePurge tests the purge functionality of the ARP table
+func TestArpTablePurge(t *testing.T) {
+
+}
+
 func compareArpEntry(e1 *ArpEntry, e2 *ArpEntry) bool {
 	// TODO: use go-cmp instead of deepequal
 	if !reflect.DeepEqual(e1.IP, e2.IP) {
