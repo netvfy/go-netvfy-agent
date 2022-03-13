@@ -283,7 +283,8 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 				Ldebug.Printf("vswitch connection closing, ticker is done\n")
 				return
 			case <-cleanTicker.C:
-
+				Ldebug.Printf("checking arptable for expired entries\n")
+				arpTable.Purge()
 			}
 		}
 	}()
