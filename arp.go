@@ -93,6 +93,11 @@ func (t *ArpTable) Get(IP string) (*ArpEntry, bool, error) {
 	if !ok {
 		return nil, false, errors.New("invalid ARP entry type")
 	}
+
+	if arpEntry.Mac == nil {
+		return nil, false, errors.New("invalid ARP entry")
+	}
+
 	return arpEntry, found, nil
 }
 
