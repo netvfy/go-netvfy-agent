@@ -70,12 +70,12 @@ func (t *ArpTable) Add(IP string) error {
 }
 
 // Update updates an ArpEntry in the ArpTable syncmap.
-func (t *ArpTable) Update(IP string, mac net.HardwareAddr) error {
+func (t *ArpTable) Update(IP string, mac net.HardwareAddr, timeNow time.Time) error {
 	if IP == "" {
 		return errors.New("valid IP address must be provided")
 	}
 	ip := net.ParseIP(IP)
-	t.ArpMap.Store(IP, &ArpEntry{IP: ip, Mac: mac, Status: StatusReady, Timestamp: time.Now()})
+	t.ArpMap.Store(IP, &ArpEntry{IP: ip, Mac: mac, Status: StatusReady, Timestamp: timeNow})
 	return nil
 }
 
