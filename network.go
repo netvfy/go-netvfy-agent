@@ -393,7 +393,7 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 				if oper == OperationReply {
 					Ldebug.Printf("Received ARP response\n")
 					// We received an ARP response
-					err := arpTable.Update(spa.String(), sha, time.Now())
+					err := arpTable.Add(spa.String(), sha, time.Now())
 					if err != nil {
 						Lerror.Printf("unable to update ARP entry: %v", err)
 					}
@@ -404,7 +404,7 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 					// ETH src MAC match the arp SHA AND arp SPA match TPA
 					if bytes.Equal(frameBuf[10:16], frameBuf[26:32]) && bytes.Equal(frameBuf[32:36], frameBuf[42:46]) {
 						Ldebug.Printf("we received an GARP")
-						arpTable.Update(spa.String(), sha, time.Now())
+						arpTable.Add(spa.String(), sha, time.Now())
 					} else {
 						// We received an ARP request, send a response
 						sendBuf := GenerateARPReply(gMAC[0:6], sha, tpa, spa)
