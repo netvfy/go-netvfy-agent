@@ -402,7 +402,7 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 
 					// check if it's a valid Gratuitous ARP
 					// ETH src MAC match the arp SHA AND arp SPA match TPA
-					if bytes.Equal(frameBuf[10:16], frameBuf[26:32]) && bytes.Equal(frameBuf[32:35], frameBuf[42:45]) {
+					if bytes.Equal(frameBuf[10:16], frameBuf[26:32]) && bytes.Equal(frameBuf[32:36], frameBuf[42:46]) {
 						Ldebug.Printf("we received an GARP")
 						arpTable.Update(spa.String(), sha)
 					} else {
