@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"container/list"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -54,23 +53,8 @@ const (
 	StatusStale // 2
 )
 
-// Add adds a new nil ArpEntry to the ArpTable syncmap.
-func (t *ArpTable) Add(IP string) error {
-	if IP == "" {
-		return errors.New("valid IP address must be provided")
-	}
-
-	// Check if an entry already exist before adding one.
-	_, ok := t.ArpMap.Load(IP)
-	if !ok {
-		ip := net.ParseIP(IP)
-		t.ArpMap.Store(IP, &ArpEntry{IP: ip, Mac: nil, Status: StatusWaiting, Timestamp: time.Now()})
-	}
-	return nil
-}
-
-// Update updates an ArpEntry in the ArpTable syncmap.
-func (t *ArpTable) Update(IP string, mac net.HardwareAddr, timeNow time.Time) error {
+// Add either adds a new entry or updates an ArpEntry in the ArpTable syncmap.
+func (t *ArpTable) Add(IP string, mac net.HardwareAddr, timeNow time.Time) error {
 	if IP == "" {
 		return errors.New("valid IP address must be provided")
 	}
@@ -138,49 +122,6 @@ func (t *ArpTable) Remove(IP string) error {
 	return nil
 }
 
-// ARPQueue is a thread-safe doubly-linked list buffer of ArpQueueEntries awaiting ARP replies.
-// It is used to store queued-up packets awaiting an ARP response.
-type ARPQueue struct {
-	// embedded mutex
-	sync.Mutex
-	// embedded doubly-linked container list
-	list.List
-	// max length of buffer
-	length uint
-}
-
-// ArpQueueEntry has string representation of IP along with buffers.
-type ArpQueueEntry struct {
-	IP   string
-	buff []byte
-}
-
-// NewARPQueue creates and returns a new doubly-linked list of type ARPQueue.
-func NewARPQueue(length uint) *ARPQueue {
-	return &ARPQueue{
-		length: length,
-	}
-}
-
-// Add creates an entry and removes the oldest entry in the ARPQueue if queue length overflowed.
-func (q *ARPQueue) Add(IP string, buff []byte) {
-	q.Lock()
-	defer q.Unlock()
-
-	// If at max length, remove oldest element.
-	if q.Len() == q.length {
-		eOld := q.List.Back()
-		q.List.Remove(eOld)
-	}
-	// Add to front
-	q.List.PushFront(&ArpQueueEntry{IP, buff})
-}
-
-// Len return the current length of the container list.
-func (q *ARPQueue) Len() uint {
-	return uint(q.List.Len())
-}
-
 // Send returns a generic function to send provided frames to an connection.
 func Send(conn net.Conn) func(buff []byte) error {
 	return func(buff []byte) error {
@@ -192,61 +133,12 @@ func Send(conn net.Conn) func(buff []byte) error {
 	}
 }
 
-// IterateAndRun take a function and passes all matched frames to it.
-// This makes it far easier to test the iteration functionality.
-func (q *ARPQueue) IterateAndRun(ip string, fn func([]byte) error) {
-	q.Lock()
-	defer q.Unlock()
-
-	// Note: We are implementing no retries.
-	e := q.List.Front()
-	for e != nil {
-		entry, ok := e.Value.(*ArpQueueEntry)
-		if !ok {
-			eTemp := e.Next()
-			q.List.Remove(e)
-			e = eTemp
-
-			// TODO(sneha): properly log here
-			fmt.Sprintln("invalid value in ARPQueue")
-			continue
-		}
-
-		// Validate the frame length is at least 34 bytes or some minimum number
-		if len(entry.buff) < 34 {
-			eTemp := e.Next()
-			q.List.Remove(e)
-			e = eTemp
-
-			// TODO(sneha): properly log here
-			fmt.Sprintln("invalid frame length")
-			continue
-		}
-
-		if entry.IP != ip {
-			e = e.Next()
-			continue
-		}
-
-		// If there is a match, send out bytes
-		len := binary.BigEndian.Uint16(entry.buff[16:18])
-		err := fn(entry.buff[0 : 14+len])
-		if err != nil {
-			fmt.Printf("unable to run function: %v\n", err)
-		}
-
-		eTemp := e.Next()
-		q.List.Remove(e)
-		e = eTemp
-	}
-}
-
 // GenerateARPRequest crafts ARP Request from switch and dst IP and MAC address.
 func GenerateARPRequest(arpTable *ArpTable, srcMAC []byte, dstIP string, srcIP string) ([]byte, error) {
 
 	// FIXME this function should be .Upsert() (Add or Update the entry)
 	if arpTable != nil {
-		err := arpTable.Add(dstIP)
+		err := arpTable.Add(dstIP, net.HardwareAddr{}, time.Now())
 		if err != nil {
 			return nil, fmt.Errorf("unable to add waiting ARP entry: %v", err)
 		}
