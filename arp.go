@@ -54,12 +54,12 @@ const (
 )
 
 // Add either adds a new entry or updates an ArpEntry in the ArpTable syncmap.
-func (t *ArpTable) Add(IP string, mac net.HardwareAddr, timeNow time.Time) error {
+func (t *ArpTable) Add(IP string, mac net.HardwareAddr, timeNow time.Time, status ArpStatus) error {
 	if IP == "" {
 		return errors.New("valid IP address must be provided")
 	}
 	ip := net.ParseIP(IP)
-	t.ArpMap.Store(IP, &ArpEntry{IP: ip, Mac: mac, Status: StatusReady, Timestamp: timeNow})
+	t.ArpMap.Store(IP, &ArpEntry{IP: ip, Mac: mac, Status: status, Timestamp: timeNow})
 	return nil
 }
 
@@ -78,8 +78,10 @@ func (t *ArpTable) Get(IP string) (*ArpEntry, bool, error) {
 		return nil, false, errors.New("invalid ARP entry type")
 	}
 
-	if arpEntry.Mac == nil {
-		return nil, false, errors.New("invalid ARP entry")
+	// Update the status from waiting to stale to express that the waiting time (2seconds) has expired
+	// This will allow us to send again an ARP request
+	if arpEntry.Status == StatusWaiting && arpEntry.Timestamp.Add(time.Second*2).Before(time.Now()) {
+		arpEntry.Status = StatusStale
 	}
 
 	return arpEntry, found, nil
@@ -138,7 +140,7 @@ func GenerateARPRequest(arpTable *ArpTable, srcMAC []byte, dstIP string, srcIP s
 
 	// FIXME this function should be .Upsert() (Add or Update the entry)
 	if arpTable != nil {
-		err := arpTable.Add(dstIP, net.HardwareAddr{}, time.Now())
+		err := arpTable.Add(dstIP, net.HardwareAddr{}, time.Now(), StatusWaiting)
 		if err != nil {
 			return nil, fmt.Errorf("unable to add waiting ARP entry: %v", err)
 		}
