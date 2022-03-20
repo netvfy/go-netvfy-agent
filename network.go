@@ -148,7 +148,7 @@ func ReadUTUN() {
 			Lerror.Printf("unable to retrieve ARP entry for %v: %v", dstIP.String(), err)
 		}
 
-		if found {
+		if found && entry.Status == StatusReady {
 			// We found the destination MAC in the ARP table, continue to craft
 			// the ethernet header of the IP packet.
 
@@ -163,7 +163,7 @@ func ReadUTUN() {
 			}
 			Ldebug.Printf("wrote %d bytes to vswitch\n", b)
 
-		} else {
+		} else if !found || found && entry.Status == StatusStale {
 
 			// TODO: Queue ethernet frame while ARP is being resolving the dst MAC address
 
@@ -394,7 +394,7 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 				if oper == OperationReply {
 					Ldebug.Printf("Received ARP response\n")
 					// We received an ARP response
-					err := arpTable.Add(spa.String(), sha, time.Now())
+					err := arpTable.Add(spa.String(), sha, time.Now(), StatusReady)
 					if err != nil {
 						Lerror.Printf("unable to update ARP entry: %v", err)
 					}
@@ -405,7 +405,7 @@ func connSwitch(ctx context.Context, cancel context.CancelFunc, config *tls.Conf
 					// ETH src MAC match the arp SHA AND arp SPA match TPA
 					if bytes.Equal(frameBuf[10:16], frameBuf[26:32]) && bytes.Equal(frameBuf[32:36], frameBuf[42:46]) {
 						Ldebug.Printf("we received an GARP")
-						arpTable.Add(spa.String(), sha, time.Now())
+						arpTable.Add(spa.String(), sha, time.Now(), StatusReady)
 					} else {
 						// We received an ARP request, send a response
 						sendBuf := GenerateARPReply(gMAC[0:6], sha, tpa, spa)
